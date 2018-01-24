@@ -1,0 +1,1257 @@
+---
+title: "Contextual Browsing Simulation"
+output: html_notebook
+---
+
+Set up some parameters:
+```{r}
+NUM_ENTITIES <- 50  # how many entities we start with
+PROP_ADDITIONS <- .1 # how many entities are added in each hop
+PROP_DELETIONS <- .3 # how many entities are deleted in each hop
+SLEEP_DELAY <- 2 # num seconds to sleep (for politeness between SPARQL requests)
+CHUNK_SIZE <- 4000 # max number of VALUES arguments to inject into any one SPARQL query (Virtuoso limitation)
+RESULT_LIMIT <- 9000 # max dataset size to retrieve fora ny one SPARQL query (Virtuoso limitation)
+endpointeeboo <- 'http://localhost:9999/blazegraph/namespace/eeboo/sparql'
+endpointdbp <- 'http://dbpedia.org/sparql'
+endpointetree <- 'http://etree.linkedmusic.org/sparql'
+randomDbp <- read_csv(col_names = TRUE, "./10K_random_dbpedia_URIs.csv")
+names(randomDbp) <- c("entity", "type", "graph")
+randomEtree <- read_csv("./etreeRandom.csv")
+names(randomDbp) <- c("entity", "type", "graph")
+fullSetQuery <- "select distinct ?entity ?type ?graph where {
+    ?seed ?predicate ?entity .
+    graph ?graph {
+      ?entity a ?type .
+    }
+}"
+fullSet <- read_csv(POST(url=endpointeeboo, encode = c("form"), body=list(query = fullSetQuery), accept("text/csv"))$content)
+
+# nb random dbpedia and etree files pre-generated as per the following, from here:
+# https://stackoverflow.com/questions/5677340/how-to-select-random-dbpedia-nodes-from-sparql
+#select ?s ?t ?g {
+#    graph ?g { 
+#      ?s a ?t .
+#    }
+#    FILTER(!isBlank(?s)) .
+#    bind(rand(1 + strlen(str(?s))*0) as ?rid)
+#} order by ?rid
+#LIMIT 10000
+
+
+
+```
+
+Load SPARQL libraries and configure endpoint:
+```{r}
+library("RCurl")
+library("SPARQL")
+library("tidyverse")
+library("XML")
+library("httr")
+library("gridExtra")
+
+```
+Pseudo-randomly select seed sets of entities with a certain type from the dataset.
+```{r}
+set.seed(12345);
+
+#eebooSeedSetQuery = paste0("select distinct ?entity ?type ?graph where { 
+#  graph ?graph { 
+#    BIND(<http://eeboo.oerc.ox.ac.uk/eeboo/Person> as ?type) .
+#    ?entity a ?type .
+#  }
+#} LIMIT ", NUM_ENTITIES)
+
+#eebooSeedSet <- read_csv(POST(url=endpointeeboo, encode = c("form"), body=list(query = eebooSeedSetQuery), accept("text/csv"))$content)
+
+eebooSeedSet <- fullSet %>% filter(type == "http://eeboo.oerc.ox.ac.uk/eeboo/Person") %>% sample_n(NUM_ENTITIES)
+
+dbpSmallSeedSetQuery = paste0("select distinct ?entity ?type ?graph where { 
+  graph ?graph {
+   BIND(yago:WikicatBenedictineWriters as ?type) .
+   ?entity a ?type .
+  }
+} ")
+
+dbpHugeSeedSetQuery = paste0("select distinct ?entity ?type ?graph where { 
+  graph ?graph {
+   BIND(yago:WikicatRomanCatholicTheologians as ?type) .
+   ?entity a ?type .
+  }
+}") 
+
+etreeSeedSetQuery = paste0("select distinct ?entity ?type ?graph where { 
+  graph ?graph { 
+    bind(<http://purl.org/ontology/mo/MusicArtist> as ?type) .
+    ?entity a ?type .
+  }
+}")
+
+dbpSmallFullSet <- read_csv(POST(url=endpointdbp, encode = c("form"), body=list(query = dbpSmallSeedSetQuery), accept("text/csv"))$content)
+# dbp small set is limited to only a few entites, ensure we don't sample more than those
+dbpSmallSeedSet <- dbpSmallFullSet %>% sample_n(min(nrow(dbpSmallFullSet), NUM_ENTITIES))
+
+etreeSeedSet <- sample_n(read_csv(POST(url=endpointetree, encode = c("form"), body=list(query = etreeSeedSetQuery), accept("text/csv"))$content), NUM_ENTITIES)
+
+dbpHugeSeedSet <- sample_n(read_csv(POST(url=endpointdbp, encode = c("form"), body=list(query = dbpHugeSeedSetQuery), accept("text/csv"))$content), NUM_ENTITIES)
+```
+
+
+Function to obtain one-hop neighbours for a set of entities
+```{r}
+oneHopNeighbours <- function(entitySet, endpoint=endpointeeboo) {
+  # virtuoso imposes a limit of arguments sent to VALUES of 4094 entities
+  # => for more than these, must send separate queries
+  entities <- unique(entitySet$entity)
+  # split into chunks
+  entities <- split(entities, ceiling(seq_along(entities) / CHUNK_SIZE)) 
+  allResultsAllChunks <- tibble() # cumulative results for all iterations over all chunks
+  for (chunk in entities) { 
+    print(paste0("Starting new chunk, length ", length(chunk)))
+    entitySetString <- paste0("<", chunk , ">", collapse=" ")
+    oneHopQuery <- paste0("select distinct ?entity ?type ?graph where { 
+  	  ?seed ?predicate ?entity .
+    	graph ?graph { 
+    	  ?entity a ?type .
+    	}
+      VALUES ?seed { ", entitySetString, "} .
+      FILTER(!isBlank(?entity)) .
+    } ")
+    # this might be a huge number of results, so we need to take it one "chunk" at a time
+    # using SPARQL LIMIT and OFFSET
+    iterationResults <- tibble() # results for the current OFFSET iteration
+    allResults <- tibble() # cumulative results for all iterations over this chunk
+    numResults <- 1 # initialise "finish" flag
+    iteration <- 0
+    while(numResults > 0) { 
+      Sys.sleep(SLEEP_DELAY)
+      offsetQuery <- paste0(oneHopQuery, "LIMIT ", RESULT_LIMIT, " OFFSET ", iteration * RESULT_LIMIT)
+      iterationResults <- read_csv(POST(url=endpoint, encode = c("form"), body=list(query = offsetQuery), accept("text/csv"))$content)
+      print("OneHop")
+      if(length(iterationResults) == 3) { 
+        allResults <- rbind(allResults, iterationResults)
+        numResults <- nrow(iterationResults)
+        iteration <- iteration + 1
+      } else {
+        print("Invalid results, retrying:")
+      }
+      print(numResults)
+      print(nrow(allResults))
+      print(iteration)
+    }
+    allResultsAllChunks <- rbind(allResultsAllChunks, allResults)
+  }
+  return(allResultsAllChunks)
+}
+```
+
+Function to obtain descriptions (p,o tuples) for a set of entities.
+```{r}
+describeEntities <- function(entitySet, endpoint=endpointeeboo) {
+  # virtuoso imposes a limit of arguments sent to VALUES of 4094 entities
+  # => for more than these, must send separate queries
+  entities <- unique(entitySet$entity)
+  # split into chunks
+  entities <- split(entities, ceiling(seq_along(entities) / CHUNK_SIZE)) 
+  allResultsAllChunks <- tibble() # cumulative results for all iterations over all chunks
+  for(chunk in entities){
+    print(paste0("Starting new chunk, length ", length(chunk)))
+    entitySetString <- paste0("<", chunk, ">", collapse=" ")
+    entityDescriptionQuery <- paste0("select distinct ?entity ?predicate ?description
+    where { 
+        ?entity ?predicate ?description .
+        VALUES ?entity {", entitySetString, " }
+        FILTER(?entity != ?description ) .
+        FILTER(!isBlank(?description)) .
+    }")
+    # this might be a huge number of results, so we need to take it one "chunk" at a time
+    # using SPARQL LIMIT and OFFSET
+    iterationResults <- tibble() # results for the current OFFSET iteration
+    allResults <- tibble() # cumulative results for all iterations for this chunk
+    numResults <- 1 # initialise "finish" flag
+    iteration <- 0
+    while(numResults > 0) { 
+      Sys.sleep(SLEEP_DELAY)
+      offsetQuery <- paste0(entityDescriptionQuery, "LIMIT ", RESULT_LIMIT, " OFFSET ", iteration * RESULT_LIMIT)
+      iterationResults <- read_csv(POST(url=endpoint, encode = c("form"), body=list(query = offsetQuery), accept("text/csv"))$content)
+      print("describeEntities")
+      if(length(iterationResults) == 3) { 
+        allResults <- rbind(allResults, iterationResults)
+        numResults <- nrow(iterationResults)
+        iteration <- iteration + 1
+      } else { 
+        print("Invalid result, retrying: ")
+      }
+      print(numResults)
+      print(nrow(allResults))
+      print(iteration)
+    }
+    allResultsAllChunks <- rbind(allResultsAllChunks, allResults)
+  }
+  return(allResultsAllChunks)
+}
+```
+
+Function to calculate Jaccard similarity scores based on sets of entity descriptions
+```{r}
+
+calcJaccardSim <- function(entityA, entityB, setA, setB) { 
+  entityATuples <- setA %>% 
+    filter(entity == entityA) %>% 
+    select(predicate, description)
+  entityBTuples <- setB %>% 
+    filter(entity == entityB) %>% 
+    select(predicate, description)
+  nrowIntersect <- nrow(intersect(entityATuples, entityBTuples))
+  nrowUnion <- nrow(union(entityATuples, entityBTuples))
+  j <- as.numeric(nrowIntersect/nrowUnion)
+  return (j)
+}
+
+doJaccard <- function(setA, setB) { 
+  combinations <- expand.grid(unique(setA$entity), unique(setB$entity)) %>% filter(as.character(Var1) != as.character(Var2))
+  combinations$j <- mapply(calcJaccardSim, MoreArgs=list(setA, setB), combinations$Var1, combinations$Var2)
+  return(combinations)
+}
+
+
+```
+
+
+Function to modify seed set based on 'unprioritized browsing' (i.e. following graph connections one step)
+```{r}
+unprioritisedBrowsing <- function(entitySet, endpoint=endpointeeboo) {
+  entitySetString <- paste0("<", entitySet$entity, ">", collapse=" ")
+  # oneHopQuery <- paste0("select distinct ?entity ?type ?graph where { 
+  # 	{
+  # 	  ?seed ?predicate ?entity .
+  # 	} UNION { 
+  # 	  ?entity ?predicate ?seed .
+  # 	}
+  # 	graph ?graph { 
+  # 	  ?entity a ?type .
+  # 	}
+  #   VALUES ?seed { ", entitySetString, "} .
+  # }")
+ # oneHop <- postQuery(endpoint, oneHopQuery)
+  oneHop <- oneHopNeighbours(entitySet, endpoint)
+  print(paste0("OneHop size: ", nrow(oneHop)))
+  entitySetSize <- nrow(entitySet)# initial size pre-additions / deletions
+  # randomly "delete" (sub-sample) from the entity set
+  entitySet <- sample_n(entitySet, entitySetSize - round(entitySetSize* PROP_DELETIONS))
+  # randomly add to the entity set
+  cutoff <- min(round(entitySetSize * PROP_ADDITIONS), nrow(oneHop))
+  entitySet <- rbind(entitySet, sample_n(oneHop, cutoff))
+  Sys.sleep(SLEEP_DELAY) # be polite
+  return(entitySet)
+}
+```
+
+Functions to modify seed set based on 'random selection' (i.e. random triple choice)
+```{r}
+randomBrowsingEtree <- function(entitySet) {
+  entitySetSize <- nrow(entitySet)
+  # randomly delete from the entity set
+  entitySet <- sample_n(entitySet, entitySetSize - round(entitySetSize * PROP_DELETIONS))
+  # randomly add to the entity set
+  entitySet <- rbind(entitySet, sample_n(randomEtree, round(entitySetSize * PROP_ADDITIONS)))
+  
+  return(entitySet)
+}
+
+randomBrowsingEeboo <- function(entitySet) {
+  entitySetSize <- nrow(entitySet)
+  # randomly delete from the entity set
+  entitySet <- sample_n(entitySet, entitySetSize - round(entitySetSize * PROP_DELETIONS))
+  # randomly add to the entity set
+  entitySet <- rbind(entitySet, sample_n(fullSet, round(entitySetSize * PROP_ADDITIONS)))
+  
+  return(entitySet)
+}
+
+randomBrowsingDbp <- function(entitySet, endpoint = endpointdbp) { 
+  entitySetSize <- nrow(entitySet)
+  # randomly delete
+  entitySet <- sample_n(entitySet, entitySetSize - round(entitySetSize * PROP_DELETIONS))
+  # randomly add
+  entitySet <- rbind(entitySet, sample_n(randomDbp, round(entitySetSize * PROP_ADDITIONS)))
+  return(entitySet)
+}
+```
+
+
+Function to modify seed set based on 'prioritised browsing' (using Jaccard similarity)
+```{r}
+prioritisedBrowsing <- function(entitySet, endpoint=endpointeeboo) { 
+  entityDescriptions <- describeEntities(entitySet, endpoint)
+  neighbours <- oneHopNeighbours(entitySet, endpoint)
+  neighbourDescriptions <- describeEntities(neighbours, endpoint)
+  # and calculate jaccard for each neighbour
+  print("Doing jaccard")
+  jaccard <- doJaccard(entityDescriptions, neighbourDescriptions)
+  names(jaccard) <- c("entity", "neighbour", "score")
+  print("Done jaccard")
+  
+  # remove exact matches
+  jaccard <- jaccard %>% anti_join(jaccard, by=c("neighbour" = "entity")) 
+  jaccard <- jaccard %>% anti_join(jaccard, by=c("entity" = "neighbour"))
+  
+  # worst-scoring entities, for deletion
+  worstScoringEntities <- jaccard %>% 
+    select(entity, score) %>% 
+    group_by(entity) %>%
+    summarise(mean = mean(score)) %>%
+    sample_n(nrow(.)) %>% # randomise order (for ties in the arrange...)
+    arrange(mean) %>% # ...arrange by mean
+    head(n=round(nrow(entitySet) * PROP_DELETIONS)) %>% 
+    select(entity)
+ 
+  # best-scoring neighbours, for addition
+  bestScoringNeighbours <- jaccard %>% 
+    select(neighbour, score) %>% 
+    group_by(neighbour) %>%
+    summarise(mean = mean(score)) %>%
+    sample_n(nrow(.)) %>% # randomise order (for ties in the arrange...)
+    arrange(desc(mean)) %>% # arrange by mean (desc => biggest first)
+    head(n=round(nrow(entitySet) * PROP_ADDITIONS)) %>%
+    select(neighbour) %>%
+    rename(entity = neighbour)
+
+  entitySet <- entitySet %>% full_join(bestScoringNeighbours) # add in the "best" neighbours
+  entitySet <- entitySet %>% anti_join(worstScoringEntities) # discard the "worst" seed-entities
+  Sys.sleep(SLEEP_DELAY)
+  return(entitySet)
+}
+```
+
+EEBOO
+
+```{r}
+
+## EEBOO
+start.time <- Sys.time()
+
+eebooPrioritised1 <- prioritisedBrowsing(eebooSeedSet, endpointeeboo)
+eebooP1_Seed <- doJaccard(describeEntities(eebooPrioritised1), describeEntities(eebooSeedSet))
+
+eebooPrioritised2 <- prioritisedBrowsing(eebooPrioritised1, endpointeeboo)
+eebooP2_1<- doJaccard(describeEntities(eebooPrioritised2), describeEntities(eebooPrioritised1))
+eebooP2_Seed <- doJaccard(describeEntities(eebooPrioritised2), describeEntities(eebooSeedSet))
+
+eebooPrioritised3 <- prioritisedBrowsing(eebooPrioritised2, endpointeeboo)
+eebooP3_2<- doJaccard(describeEntities(eebooPrioritised3), describeEntities(eebooPrioritised2))
+eebooP3_Seed <- doJaccard(describeEntities(eebooPrioritised3), describeEntities(eebooSeedSet))
+
+eebooPrioritised4 <- prioritisedBrowsing(eebooPrioritised3, endpointeeboo)
+eebooP4_3<- doJaccard(describeEntities(eebooPrioritised4), describeEntities(eebooPrioritised3))
+eebooP4_Seed <- doJaccard(describeEntities(eebooPrioritised4), describeEntities(eebooSeedSet))
+
+eebooPrioritised5 <- prioritisedBrowsing(eebooPrioritised4, endpointeeboo)
+eebooP5_4<- doJaccard(describeEntities(eebooPrioritised5), describeEntities(eebooPrioritised4))
+eebooP5_Seed <- doJaccard(describeEntities(eebooPrioritised5), describeEntities(eebooSeedSet))
+
+eebooPrioritised6 <- prioritisedBrowsing(eebooPrioritised5, endpointeeboo)
+eebooP6_5<- doJaccard(describeEntities(eebooPrioritised6), describeEntities(eebooPrioritised5))
+eebooP6_Seed <- doJaccard(describeEntities(eebooPrioritised6), describeEntities(eebooSeedSet))
+
+eebooPrioritised7 <- prioritisedBrowsing(eebooPrioritised6, endpointeeboo)
+eebooP7_6<- doJaccard(describeEntities(eebooPrioritised7), describeEntities(eebooPrioritised6))
+eebooP7_Seed <- doJaccard(describeEntities(eebooPrioritised7), describeEntities(eebooSeedSet))
+
+eebooPrioritised8 <- prioritisedBrowsing(eebooPrioritised7, endpointeeboo)
+eebooP8_7<- doJaccard(describeEntities(eebooPrioritised8), describeEntities(eebooPrioritised7))
+eebooP8_Seed <- doJaccard(describeEntities(eebooPrioritised8), describeEntities(eebooSeedSet))
+
+
+eebooPrioritised9 <- prioritisedBrowsing(eebooPrioritised8, endpointeeboo)
+eebooP9_8<- doJaccard(describeEntities(eebooPrioritised9), describeEntities(eebooPrioritised8))
+eebooP9_Seed <- doJaccard(describeEntities(eebooPrioritised9), describeEntities(eebooSeedSet))
+
+eebooPrioritised10 <- prioritisedBrowsing(eebooPrioritised9, endpointeeboo)
+eebooP10_9<- doJaccard(describeEntities(eebooPrioritised10), describeEntities(eebooPrioritised9))
+eebooP10_Seed <- doJaccard(describeEntities(eebooPrioritised10), describeEntities(eebooSeedSet))
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+
+
+start.time <- Sys.time()
+
+eebooUnprioritised1 <- unprioritisedBrowsing(eebooSeedSet, endpointeeboo)
+eebooU1_Seed <- doJaccard(describeEntities(eebooUnprioritised1), describeEntities(eebooSeedSet))
+
+eebooUnprioritised2 <- unprioritisedBrowsing(eebooUnprioritised1, endpointeeboo)
+eebooU2_1<- doJaccard(describeEntities(eebooUnprioritised2), describeEntities(eebooUnprioritised1))
+eebooU2_Seed <- doJaccard(describeEntities(eebooUnprioritised2), describeEntities(eebooSeedSet))
+
+eebooUnprioritised3 <- unprioritisedBrowsing(eebooUnprioritised2, endpointeeboo)
+eebooU3_2<- doJaccard(describeEntities(eebooUnprioritised3), describeEntities(eebooUnprioritised2))
+eebooU3_Seed <- doJaccard(describeEntities(eebooUnprioritised3), describeEntities(eebooSeedSet))
+
+eebooUnprioritised4 <- unprioritisedBrowsing(eebooUnprioritised3, endpointeeboo)
+eebooU4_3<- doJaccard(describeEntities(eebooUnprioritised4), describeEntities(eebooUnprioritised3))
+eebooU4_Seed <- doJaccard(describeEntities(eebooUnprioritised4), describeEntities(eebooSeedSet))
+
+eebooUnprioritised5 <- unprioritisedBrowsing(eebooUnprioritised4, endpointeeboo)
+eebooU5_4<- doJaccard(describeEntities(eebooUnprioritised5), describeEntities(eebooUnprioritised4))
+eebooU5_Seed <- doJaccard(describeEntities(eebooUnprioritised5), describeEntities(eebooSeedSet))
+
+eebooUnprioritised6 <- unprioritisedBrowsing(eebooUnprioritised5, endpointeeboo)
+eebooU6_5<- doJaccard(describeEntities(eebooUnprioritised6), describeEntities(eebooUnprioritised5))
+eebooU6_Seed <- doJaccard(describeEntities(eebooUnprioritised6), describeEntities(eebooSeedSet))
+
+eebooUnprioritised7 <- unprioritisedBrowsing(eebooUnprioritised6, endpointeeboo)
+eebooU7_6<- doJaccard(describeEntities(eebooUnprioritised7), describeEntities(eebooUnprioritised6))
+eebooU7_Seed <- doJaccard(describeEntities(eebooUnprioritised7), describeEntities(eebooSeedSet))
+
+eebooUnprioritised8 <- unprioritisedBrowsing(eebooUnprioritised7, endpointeeboo)
+eebooU8_7<- doJaccard(describeEntities(eebooUnprioritised8), describeEntities(eebooUnprioritised7))
+eebooU8_Seed <- doJaccard(describeEntities(eebooUnprioritised8), describeEntities(eebooSeedSet))
+
+
+eebooUnprioritised9 <- unprioritisedBrowsing(eebooUnprioritised8, endpointeeboo)
+eebooU9_8<- doJaccard(describeEntities(eebooUnprioritised9), describeEntities(eebooUnprioritised8))
+eebooU9_Seed <- doJaccard(describeEntities(eebooUnprioritised9), describeEntities(eebooSeedSet))
+
+eebooUnprioritised10 <- unprioritisedBrowsing(eebooUnprioritised9, endpointeeboo)
+eebooU10_9<- doJaccard(describeEntities(eebooUnprioritised10), describeEntities(eebooUnprioritised9))
+eebooU10_Seed <- doJaccard(describeEntities(eebooUnprioritised10), describeEntities(eebooSeedSet))
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+
+
+start.time <- Sys.time()
+
+eebooRandom1 <- randomBrowsingEeboo(eebooSeedSet)
+eebooR1_Seed <- doJaccard(describeEntities(eebooRandom1), describeEntities(eebooSeedSet))
+
+eebooRandom2 <- randomBrowsingEeboo(eebooRandom1)
+eebooR2_1<- doJaccard(describeEntities(eebooRandom2), describeEntities(eebooRandom1))
+eebooR2_Seed <- doJaccard(describeEntities(eebooRandom2), describeEntities(eebooSeedSet))
+
+eebooRandom3 <- randomBrowsingEeboo(eebooRandom2)
+eebooR3_2<- doJaccard(describeEntities(eebooRandom3), describeEntities(eebooRandom2))
+eebooR3_Seed <- doJaccard(describeEntities(eebooRandom3), describeEntities(eebooSeedSet))
+
+eebooRandom4 <- randomBrowsingEeboo(eebooRandom3)
+eebooR4_3<- doJaccard(describeEntities(eebooRandom4), describeEntities(eebooRandom3))
+eebooR4_Seed <- doJaccard(describeEntities(eebooRandom4), describeEntities(eebooSeedSet))
+
+eebooRandom5 <- randomBrowsingEeboo(eebooRandom4)
+eebooR5_4<- doJaccard(describeEntities(eebooRandom5), describeEntities(eebooRandom4))
+eebooR5_Seed <- doJaccard(describeEntities(eebooRandom5), describeEntities(eebooSeedSet))
+
+eebooRandom6 <- randomBrowsingEeboo(eebooRandom5)
+eebooR6_5<- doJaccard(describeEntities(eebooRandom6), describeEntities(eebooRandom5))
+eebooR6_Seed <- doJaccard(describeEntities(eebooRandom6), describeEntities(eebooSeedSet))
+
+eebooRandom7 <- randomBrowsingEeboo(eebooRandom6)
+eebooR7_6<- doJaccard(describeEntities(eebooRandom7), describeEntities(eebooRandom6))
+eebooR7_Seed <- doJaccard(describeEntities(eebooRandom7), describeEntities(eebooSeedSet))
+
+eebooRandom8 <- randomBrowsingEeboo(eebooRandom7)
+eebooR8_7<- doJaccard(describeEntities(eebooRandom8), describeEntities(eebooRandom7))
+eebooR8_Seed <- doJaccard(describeEntities(eebooRandom8), describeEntities(eebooSeedSet))
+
+
+eebooRandom9 <- randomBrowsingEeboo(eebooRandom8)
+eebooR9_8<- doJaccard(describeEntities(eebooRandom9), describeEntities(eebooRandom8))
+eebooR9_Seed <- doJaccard(describeEntities(eebooRandom9), describeEntities(eebooSeedSet))
+
+eebooRandom10 <- randomBrowsingEeboo(eebooRandom9)
+eebooR10_9<- doJaccard(describeEntities(eebooRandom10), describeEntities(eebooRandom9))
+eebooR10_Seed <- doJaccard(describeEntities(eebooRandom10), describeEntities(eebooSeedSet))
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+
+```
+
+dbpSmall
+```{r}
+#DBP SMALL
+start.time <- Sys.time()
+
+dbpSmallPrioritised1 <- prioritisedBrowsing(dbpSmallSeedSet, endpointdbp)
+dbpSmallP1_Seed <- doJaccard(describeEntities(dbpSmallPrioritised1, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+dbpSmallPrioritised2 <- prioritisedBrowsing(dbpSmallPrioritised1, endpointdbp)
+dbpSmallP2_1<- doJaccard(describeEntities(dbpSmallPrioritised2, endpointdbp), describeEntities(dbpSmallPrioritised1, endpointdbp))
+dbpSmallP2_Seed <- doJaccard(describeEntities(dbpSmallPrioritised2, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+dbpSmallPrioritised3 <- prioritisedBrowsing(dbpSmallPrioritised2, endpointdbp)
+dbpSmallP3_2<- doJaccard(describeEntities(dbpSmallPrioritised3, endpointdbp), describeEntities(dbpSmallPrioritised2, endpointdbp))
+dbpSmallP3_Seed <- doJaccard(describeEntities(dbpSmallPrioritised3, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+dbpSmallPrioritised4 <- prioritisedBrowsing(dbpSmallPrioritised3, endpointdbp)
+dbpSmallP4_3<- doJaccard(describeEntities(dbpSmallPrioritised4, endpointdbp), describeEntities(dbpSmallPrioritised3, endpointdbp))
+dbpSmallP4_Seed <- doJaccard(describeEntities(dbpSmallPrioritised4, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+dbpSmallPrioritised5 <- prioritisedBrowsing(dbpSmallPrioritised4, endpointdbp)
+dbpSmallP5_4<- doJaccard(describeEntities(dbpSmallPrioritised5, endpointdbp), describeEntities(dbpSmallPrioritised4, endpointdbp))
+dbpSmallP5_Seed <- doJaccard(describeEntities(dbpSmallPrioritised5, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+dbpSmallPrioritised6 <- prioritisedBrowsing(dbpSmallPrioritised5, endpointdbp)
+dbpSmallP6_5<- doJaccard(describeEntities(dbpSmallPrioritised6, endpointdbp), describeEntities(dbpSmallPrioritised5, endpointdbp))
+dbpSmallP6_Seed <- doJaccard(describeEntities(dbpSmallPrioritised6, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+dbpSmallPrioritised7 <- prioritisedBrowsing(dbpSmallPrioritised6, endpointdbp)
+dbpSmallP7_6<- doJaccard(describeEntities(dbpSmallPrioritised7, endpointdbp), describeEntities(dbpSmallPrioritised6, endpointdbp))
+dbpSmallP7_Seed <- doJaccard(describeEntities(dbpSmallPrioritised7, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+dbpSmallPrioritised8 <- prioritisedBrowsing(dbpSmallPrioritised7, endpointdbp)
+dbpSmallP8_7<- doJaccard(describeEntities(dbpSmallPrioritised8, endpointdbp), describeEntities(dbpSmallPrioritised7, endpointdbp))
+dbpSmallP8_Seed <- doJaccard(describeEntities(dbpSmallPrioritised8, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+
+dbpSmallPrioritised9 <- prioritisedBrowsing(dbpSmallPrioritised8, endpointdbp)
+dbpSmallP9_8<- doJaccard(describeEntities(dbpSmallPrioritised9, endpointdbp), describeEntities(dbpSmallPrioritised8, endpointdbp))
+dbpSmallP9_Seed <- doJaccard(describeEntities(dbpSmallPrioritised9, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+dbpSmallPrioritised10 <- prioritisedBrowsing(dbpSmallPrioritised9, endpointdbp)
+dbpSmallP10_9<- doJaccard(describeEntities(dbpSmallPrioritised10, endpointdbp), describeEntities(dbpSmallPrioritised9, endpointdbp))
+dbpSmallP10_Seed <- doJaccard(describeEntities(dbpSmallPrioritised10, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+
+
+start.time <- Sys.time()
+
+dbpSmallUnprioritised1 <- unprioritisedBrowsing(dbpSmallSeedSet, endpointdbp)
+dbpSmallU1_Seed <- doJaccard(describeEntities(dbpSmallUnprioritised1, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+dbpSmallUnprioritised2 <- unprioritisedBrowsing(dbpSmallUnprioritised1, endpointdbp)
+dbpSmallU2_1<- doJaccard(describeEntities(dbpSmallUnprioritised2, endpointdbp), describeEntities(dbpSmallUnprioritised1, endpointdbp))
+dbpSmallU2_Seed <- doJaccard(describeEntities(dbpSmallUnprioritised2, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+dbpSmallUnprioritised3 <- unprioritisedBrowsing(dbpSmallUnprioritised2, endpointdbp)
+dbpSmallU3_2<- doJaccard(describeEntities(dbpSmallUnprioritised3, endpointdbp), describeEntities(dbpSmallUnprioritised2, endpointdbp))
+dbpSmallU3_Seed <- doJaccard(describeEntities(dbpSmallUnprioritised3, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+dbpSmallUnprioritised4 <- unprioritisedBrowsing(dbpSmallUnprioritised3, endpointdbp)
+dbpSmallU4_3<- doJaccard(describeEntities(dbpSmallUnprioritised4, endpointdbp), describeEntities(dbpSmallUnprioritised3, endpointdbp))
+dbpSmallU4_Seed <- doJaccard(describeEntities(dbpSmallUnprioritised4, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+dbpSmallUnprioritised5 <- unprioritisedBrowsing(dbpSmallUnprioritised4, endpointdbp)
+dbpSmallU5_4<- doJaccard(describeEntities(dbpSmallUnprioritised5, endpointdbp), describeEntities(dbpSmallUnprioritised4, endpointdbp))
+dbpSmallU5_Seed <- doJaccard(describeEntities(dbpSmallUnprioritised5, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+dbpSmallUnprioritised6 <- unprioritisedBrowsing(dbpSmallUnprioritised5, endpointdbp)
+dbpSmallU6_5<- doJaccard(describeEntities(dbpSmallUnprioritised6, endpointdbp), describeEntities(dbpSmallUnprioritised5, endpointdbp))
+dbpSmallU6_Seed <- doJaccard(describeEntities(dbpSmallUnprioritised6, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+dbpSmallUnprioritised7 <- unprioritisedBrowsing(dbpSmallUnprioritised6, endpointdbp)
+dbpSmallU7_6<- doJaccard(describeEntities(dbpSmallUnprioritised7, endpointdbp), describeEntities(dbpSmallUnprioritised6, endpointdbp))
+dbpSmallU7_Seed <- doJaccard(describeEntities(dbpSmallUnprioritised7, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+dbpSmallUnprioritised8 <- unprioritisedBrowsing(dbpSmallUnprioritised7, endpointdbp)
+dbpSmallU8_7<- doJaccard(describeEntities(dbpSmallUnprioritised8, endpointdbp), describeEntities(dbpSmallUnprioritised7, endpointdbp))
+dbpSmallU8_Seed <- doJaccard(describeEntities(dbpSmallUnprioritised8, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+dbpSmallUnprioritised9 <- unprioritisedBrowsing(dbpSmallUnprioritised8, endpointdbp)
+dbpSmallU9_8<- doJaccard(describeEntities(dbpSmallUnprioritised9, endpointdbp), describeEntities(dbpSmallUnprioritised8, endpointdbp))
+dbpSmallU9_Seed <- doJaccard(describeEntities(dbpSmallUnprioritised9, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+dbpSmallUnprioritised10 <- unprioritisedBrowsing(dbpSmallUnprioritised9, endpointdbp)
+dbpSmallU10_9<- doJaccard(describeEntities(dbpSmallUnprioritised10, endpointdbp), describeEntities(dbpSmallUnprioritised9, endpointdbp))
+dbpSmallU10_Seed <- doJaccard(describeEntities(dbpSmallUnprioritised10, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+
+
+start.time <- Sys.time()
+
+dbpSmallRandom1 <- randomBrowsingDbp(dbpSmallSeedSet)
+dbpSmallR1_Seed <- doJaccard(describeEntities(dbpSmallRandom1, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+dbpSmallRandom2 <- randomBrowsingDbp(dbpSmallRandom1)
+dbpSmallR2_1<- doJaccard(describeEntities(dbpSmallRandom2, endpointdbp), describeEntities(dbpSmallRandom1, endpointdbp))
+dbpSmallR2_Seed <- doJaccard(describeEntities(dbpSmallRandom2, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+dbpSmallRandom3 <- randomBrowsingDbp(dbpSmallRandom2)
+dbpSmallR3_2<- doJaccard(describeEntities(dbpSmallRandom3, endpointdbp), describeEntities(dbpSmallRandom2, endpointdbp))
+dbpSmallR3_Seed <- doJaccard(describeEntities(dbpSmallRandom3, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+dbpSmallRandom4 <- randomBrowsingDbp(dbpSmallRandom3)
+dbpSmallR4_3<- doJaccard(describeEntities(dbpSmallRandom4, endpointdbp), describeEntities(dbpSmallRandom3, endpointdbp))
+dbpSmallR4_Seed <- doJaccard(describeEntities(dbpSmallRandom4, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+dbpSmallRandom5 <- randomBrowsingDbp(dbpSmallRandom4)
+dbpSmallR5_4<- doJaccard(describeEntities(dbpSmallRandom5, endpointdbp), describeEntities(dbpSmallRandom4, endpointdbp))
+dbpSmallR5_Seed <- doJaccard(describeEntities(dbpSmallRandom5, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+dbpSmallRandom6 <- randomBrowsingDbp(dbpSmallRandom5)
+dbpSmallR6_5<- doJaccard(describeEntities(dbpSmallRandom6, endpointdbp), describeEntities(dbpSmallRandom5, endpointdbp))
+dbpSmallR6_Seed <- doJaccard(describeEntities(dbpSmallRandom6, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+dbpSmallRandom7 <- randomBrowsingDbp(dbpSmallRandom6)
+dbpSmallR7_6<- doJaccard(describeEntities(dbpSmallRandom7, endpointdbp), describeEntities(dbpSmallRandom6, endpointdbp))
+dbpSmallR7_Seed <- doJaccard(describeEntities(dbpSmallRandom7, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+dbpSmallRandom8 <- randomBrowsingDbp(dbpSmallRandom7)
+dbpSmallR8_7<- doJaccard(describeEntities(dbpSmallRandom8, endpointdbp), describeEntities(dbpSmallRandom7, endpointdbp))
+dbpSmallR8_Seed <- doJaccard(describeEntities(dbpSmallRandom8, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+dbpSmallRandom9 <- randomBrowsingDbp(dbpSmallRandom8)
+dbpSmallR9_8<- doJaccard(describeEntities(dbpSmallRandom9, endpointdbp), describeEntities(dbpSmallRandom8, endpointdbp))
+dbpSmallR9_Seed <- doJaccard(describeEntities(dbpSmallRandom9, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+dbpSmallRandom10 <- randomBrowsingDbp(dbpSmallRandom9)
+dbpSmallR10_9<- doJaccard(describeEntities(dbpSmallRandom10, endpointdbp), describeEntities(dbpSmallRandom9, endpointdbp))
+dbpSmallR10_Seed <- doJaccard(describeEntities(dbpSmallRandom10, endpointdbp), describeEntities(dbpSmallSeedSet, endpointdbp))
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+```
+
+
+dbpHuge
+```{r}
+#DBP HUGE
+start.time <- Sys.time()
+
+dbpHugePrioritised1 <- prioritisedBrowsing(dbpHugeSeedSet, endpointdbp)
+dbpHugeP1_Seed <- doJaccard(describeEntities(dbpHugePrioritised1, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+dbpHugePrioritised2 <- prioritisedBrowsing(dbpHugePrioritised1, endpointdbp)
+dbpHugeP2_1<- doJaccard(describeEntities(dbpHugePrioritised2, endpointdbp), describeEntities(dbpHugePrioritised1, endpointdbp))
+dbpHugeP2_Seed <- doJaccard(describeEntities(dbpHugePrioritised2, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+dbpHugePrioritised3 <- prioritisedBrowsing(dbpHugePrioritised2, endpointdbp)
+dbpHugeP3_2<- doJaccard(describeEntities(dbpHugePrioritised3, endpointdbp), describeEntities(dbpHugePrioritised2, endpointdbp))
+dbpHugeP3_Seed <- doJaccard(describeEntities(dbpHugePrioritised3, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+dbpHugePrioritised4 <- prioritisedBrowsing(dbpHugePrioritised3, endpointdbp)
+dbpHugeP4_3<- doJaccard(describeEntities(dbpHugePrioritised4, endpointdbp), describeEntities(dbpHugePrioritised3, endpointdbp))
+dbpHugeP4_Seed <- doJaccard(describeEntities(dbpHugePrioritised4, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+dbpHugePrioritised5 <- prioritisedBrowsing(dbpHugePrioritised4, endpointdbp)
+dbpHugeP5_4<- doJaccard(describeEntities(dbpHugePrioritised5, endpointdbp), describeEntities(dbpHugePrioritised4, endpointdbp))
+dbpHugeP5_Seed <- doJaccard(describeEntities(dbpHugePrioritised5, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+dbpHugePrioritised6 <- prioritisedBrowsing(dbpHugePrioritised5, endpointdbp)
+dbpHugeP6_5<- doJaccard(describeEntities(dbpHugePrioritised6, endpointdbp), describeEntities(dbpHugePrioritised5, endpointdbp))
+dbpHugeP6_Seed <- doJaccard(describeEntities(dbpHugePrioritised6, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+dbpHugePrioritised7 <- prioritisedBrowsing(dbpHugePrioritised6, endpointdbp)
+dbpHugeP7_6<- doJaccard(describeEntities(dbpHugePrioritised7, endpointdbp), describeEntities(dbpHugePrioritised6, endpointdbp))
+dbpHugeP7_Seed <- doJaccard(describeEntities(dbpHugePrioritised7, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+dbpHugePrioritised8 <- prioritisedBrowsing(dbpHugePrioritised7, endpointdbp)
+dbpHugeP8_7<- doJaccard(describeEntities(dbpHugePrioritised8, endpointdbp), describeEntities(dbpHugePrioritised7, endpointdbp))
+dbpHugeP8_Seed <- doJaccard(describeEntities(dbpHugePrioritised8, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+
+dbpHugePrioritised9 <- prioritisedBrowsing(dbpHugePrioritised8, endpointdbp)
+dbpHugeP9_8<- doJaccard(describeEntities(dbpHugePrioritised9, endpointdbp), describeEntities(dbpHugePrioritised8, endpointdbp))
+dbpHugeP9_Seed <- doJaccard(describeEntities(dbpHugePrioritised9, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+dbpHugePrioritised10 <- prioritisedBrowsing(dbpHugePrioritised9, endpointdbp)
+dbpHugeP10_9<- doJaccard(describeEntities(dbpHugePrioritised10, endpointdbp), describeEntities(dbpHugePrioritised9, endpointdbp))
+dbpHugeP10_Seed <- doJaccard(describeEntities(dbpHugePrioritised10, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+end.time <- Sys.time()
+time.taken.p <- end.time - start.time
+time.taken.p
+
+
+
+dbpHugeUnprioritised1 <- unprioritisedBrowsing(dbpHugeSeedSet, endpointdbp)
+dbpHugeU1_Seed <- doJaccard(describeEntities(dbpHugeUnprioritised1, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+start.time <- Sys.time()
+dbpHugeUnprioritised2 <- unprioritisedBrowsing(dbpHugeUnprioritised1, endpointdbp)
+dbpHugeU2_1<- doJaccard(describeEntities(dbpHugeUnprioritised2, endpointdbp), describeEntities(dbpHugeUnprioritised1, endpointdbp))
+dbpHugeU2_Seed <- doJaccard(describeEntities(dbpHugeUnprioritised2, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+dbpHugeUnprioritised3 <- unprioritisedBrowsing(dbpHugeUnprioritised2, endpointdbp)
+dbpHugeU3_2<- doJaccard(describeEntities(dbpHugeUnprioritised3, endpointdbp), describeEntities(dbpHugeUnprioritised2, endpointdbp))
+dbpHugeU3_Seed <- doJaccard(describeEntities(dbpHugeUnprioritised3, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+dbpHugeUnprioritised4 <- unprioritisedBrowsing(dbpHugeUnprioritised3, endpointdbp)
+dbpHugeU4_3<- doJaccard(describeEntities(dbpHugeUnprioritised4, endpointdbp), describeEntities(dbpHugeUnprioritised3, endpointdbp))
+dbpHugeU4_Seed <- doJaccard(describeEntities(dbpHugeUnprioritised4, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+dbpHugeUnprioritised5 <- unprioritisedBrowsing(dbpHugeUnprioritised4, endpointdbp)
+dbpHugeU5_4<- doJaccard(describeEntities(dbpHugeUnprioritised5, endpointdbp), describeEntities(dbpHugeUnprioritised4, endpointdbp))
+dbpHugeU5_Seed <- doJaccard(describeEntities(dbpHugeUnprioritised5, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+dbpHugeUnprioritised6 <- unprioritisedBrowsing(dbpHugeUnprioritised5, endpointdbp)
+dbpHugeU6_5<- doJaccard(describeEntities(dbpHugeUnprioritised6, endpointdbp), describeEntities(dbpHugeUnprioritised5, endpointdbp))
+dbpHugeU6_Seed <- doJaccard(describeEntities(dbpHugeUnprioritised6, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+dbpHugeUnprioritised7 <- unprioritisedBrowsing(dbpHugeUnprioritised6, endpointdbp)
+dbpHugeU7_6<- doJaccard(describeEntities(dbpHugeUnprioritised7, endpointdbp), describeEntities(dbpHugeUnprioritised6, endpointdbp))
+dbpHugeU7_Seed <- doJaccard(describeEntities(dbpHugeUnprioritised7, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+dbpHugeUnprioritised8 <- unprioritisedBrowsing(dbpHugeUnprioritised7, endpointdbp)
+dbpHugeU8_7<- doJaccard(describeEntities(dbpHugeUnprioritised8, endpointdbp), describeEntities(dbpHugeUnprioritised7, endpointdbp))
+dbpHugeU8_Seed <- doJaccard(describeEntities(dbpHugeUnprioritised8, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+dbpHugeUnprioritised9 <- unprioritisedBrowsing(dbpHugeUnprioritised8, endpointdbp)
+dbpHugeU9_8<- doJaccard(describeEntities(dbpHugeUnprioritised9, endpointdbp), describeEntities(dbpHugeUnprioritised8, endpointdbp))
+dbpHugeU9_Seed <- doJaccard(describeEntities(dbpHugeUnprioritised9, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+dbpHugeUnprioritised10 <- unprioritisedBrowsing(dbpHugeUnprioritised9, endpointdbp)
+dbpHugeU10_9<- doJaccard(describeEntities(dbpHugeUnprioritised10, endpointdbp), describeEntities(dbpHugeUnprioritised9, endpointdbp))
+dbpHugeU10_Seed <- doJaccard(describeEntities(dbpHugeUnprioritised10, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+end.time <- Sys.time()
+time.taken.u <- end.time - start.time
+time.taken.u
+
+
+start.time <- Sys.time()
+
+dbpHugeRandom1 <- randomBrowsingDbp(dbpHugeSeedSet)
+dbpHugeR1_Seed <- doJaccard(describeEntities(dbpHugeRandom1, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+dbpHugeRandom2 <- randomBrowsingDbp(dbpHugeRandom1)
+dbpHugeR2_1<- doJaccard(describeEntities(dbpHugeRandom2, endpointdbp), describeEntities(dbpHugeRandom1, endpointdbp))
+dbpHugeR2_Seed <- doJaccard(describeEntities(dbpHugeRandom2, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+dbpHugeRandom3 <- randomBrowsingDbp(dbpHugeRandom2)
+dbpHugeR3_2<- doJaccard(describeEntities(dbpHugeRandom3, endpointdbp), describeEntities(dbpHugeRandom2, endpointdbp))
+dbpHugeR3_Seed <- doJaccard(describeEntities(dbpHugeRandom3, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+dbpHugeRandom4 <- randomBrowsingDbp(dbpHugeRandom3)
+dbpHugeR4_3<- doJaccard(describeEntities(dbpHugeRandom4, endpointdbp), describeEntities(dbpHugeRandom3, endpointdbp))
+dbpHugeR4_Seed <- doJaccard(describeEntities(dbpHugeRandom4, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+dbpHugeRandom5 <- randomBrowsingDbp(dbpHugeRandom4)
+dbpHugeR5_4<- doJaccard(describeEntities(dbpHugeRandom5, endpointdbp), describeEntities(dbpHugeRandom4, endpointdbp))
+dbpHugeR5_Seed <- doJaccard(describeEntities(dbpHugeRandom5, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+dbpHugeRandom6 <- randomBrowsingDbp(dbpHugeRandom5)
+dbpHugeR6_5<- doJaccard(describeEntities(dbpHugeRandom6, endpointdbp), describeEntities(dbpHugeRandom5, endpointdbp))
+dbpHugeR6_Seed <- doJaccard(describeEntities(dbpHugeRandom6, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+dbpHugeRandom7 <- randomBrowsingDbp(dbpHugeRandom6)
+dbpHugeR7_6<- doJaccard(describeEntities(dbpHugeRandom7, endpointdbp), describeEntities(dbpHugeRandom6, endpointdbp))
+dbpHugeR7_Seed <- doJaccard(describeEntities(dbpHugeRandom7, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+dbpHugeRandom8 <- randomBrowsingDbp(dbpHugeRandom7)
+dbpHugeR8_7<- doJaccard(describeEntities(dbpHugeRandom8, endpointdbp), describeEntities(dbpHugeRandom7, endpointdbp))
+dbpHugeR8_Seed <- doJaccard(describeEntities(dbpHugeRandom8, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+dbpHugeRandom9 <- randomBrowsingDbp(dbpHugeRandom8)
+dbpHugeR9_8<- doJaccard(describeEntities(dbpHugeRandom9, endpointdbp), describeEntities(dbpHugeRandom8, endpointdbp))
+dbpHugeR9_Seed <- doJaccard(describeEntities(dbpHugeRandom9, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+dbpHugeRandom10 <- randomBrowsingDbp(dbpHugeRandom9)
+dbpHugeR10_9<- doJaccard(describeEntities(dbpHugeRandom10, endpointdbp), describeEntities(dbpHugeRandom9, endpointdbp))
+dbpHugeR10_Seed <- doJaccard(describeEntities(dbpHugeRandom10, endpointdbp), describeEntities(dbpHugeSeedSet, endpointdbp))
+
+end.time <- Sys.time()
+time.taken.r <- end.time - start.time
+time.taken.r
+```
+
+
+etree
+```{r}
+#ETREE
+start.time <- Sys.time()
+
+etreePrioritised1 <- prioritisedBrowsing(etreeSeedSet, endpointetree)
+etreeP1_Seed <- doJaccard(describeEntities(etreePrioritised1, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+etreePrioritised2 <- prioritisedBrowsing(etreePrioritised1, endpointetree)
+etreeP2_1<- doJaccard(describeEntities(etreePrioritised2, endpointetree), describeEntities(etreePrioritised1, endpointetree))
+etreeP2_Seed <- doJaccard(describeEntities(etreePrioritised2, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+etreePrioritised3 <- prioritisedBrowsing(etreePrioritised2, endpointetree)
+etreeP3_2<- doJaccard(describeEntities(etreePrioritised3, endpointetree), describeEntities(etreePrioritised2, endpointetree))
+etreeP3_Seed <- doJaccard(describeEntities(etreePrioritised3, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+etreePrioritised4 <- prioritisedBrowsing(etreePrioritised3, endpointetree)
+etreeP4_3<- doJaccard(describeEntities(etreePrioritised4, endpointetree), describeEntities(etreePrioritised3, endpointetree))
+etreeP4_Seed <- doJaccard(describeEntities(etreePrioritised4, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+etreePrioritised5 <- prioritisedBrowsing(etreePrioritised4, endpointetree)
+etreeP5_4<- doJaccard(describeEntities(etreePrioritised5, endpointetree), describeEntities(etreePrioritised4, endpointetree))
+etreeP5_Seed <- doJaccard(describeEntities(etreePrioritised5, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+etreePrioritised6 <- prioritisedBrowsing(etreePrioritised5, endpointetree)
+etreeP6_5<- doJaccard(describeEntities(etreePrioritised6, endpointetree), describeEntities(etreePrioritised5, endpointetree))
+etreeP6_Seed <- doJaccard(describeEntities(etreePrioritised6, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+etreePrioritised7 <- prioritisedBrowsing(etreePrioritised6, endpointetree)
+etreeP7_6<- doJaccard(describeEntities(etreePrioritised7, endpointetree), describeEntities(etreePrioritised6, endpointetree))
+etreeP7_Seed <- doJaccard(describeEntities(etreePrioritised7, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+etreePrioritised8 <- prioritisedBrowsing(etreePrioritised7, endpointetree)
+etreeP8_7<- doJaccard(describeEntities(etreePrioritised8, endpointetree), describeEntities(etreePrioritised7, endpointetree))
+etreeP8_Seed <- doJaccard(describeEntities(etreePrioritised8, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+
+etreePrioritised9 <- prioritisedBrowsing(etreePrioritised8, endpointetree)
+etreeP9_8<- doJaccard(describeEntities(etreePrioritised9, endpointetree), describeEntities(etreePrioritised8, endpointetree))
+etreeP9_Seed <- doJaccard(describeEntities(etreePrioritised9, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+etreePrioritised10 <- prioritisedBrowsing(etreePrioritised9, endpointetree)
+etreeP10_9<- doJaccard(describeEntities(etreePrioritised10, endpointetree), describeEntities(etreePrioritised9, endpointetree))
+etreeP10_Seed <- doJaccard(describeEntities(etreePrioritised10, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+end.time <- Sys.time()
+time.taken.p <- end.time - start.time
+time.taken.p
+
+
+
+etreeUnprioritised1 <- unprioritisedBrowsing(etreeSeedSet, endpointetree)
+etreeU1_Seed <- doJaccard(describeEntities(etreeUnprioritised1, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+start.time <- Sys.time()
+etreeUnprioritised2 <- unprioritisedBrowsing(etreeUnprioritised1, endpointetree)
+etreeU2_1<- doJaccard(describeEntities(etreeUnprioritised2, endpointetree), describeEntities(etreeUnprioritised1, endpointetree))
+etreeU2_Seed <- doJaccard(describeEntities(etreeUnprioritised2, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+etreeUnprioritised3 <- unprioritisedBrowsing(etreeUnprioritised2, endpointetree)
+etreeU3_2<- doJaccard(describeEntities(etreeUnprioritised3, endpointetree), describeEntities(etreeUnprioritised2, endpointetree))
+etreeU3_Seed <- doJaccard(describeEntities(etreeUnprioritised3, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+etreeUnprioritised4 <- unprioritisedBrowsing(etreeUnprioritised3, endpointetree)
+etreeU4_3<- doJaccard(describeEntities(etreeUnprioritised4, endpointetree), describeEntities(etreeUnprioritised3, endpointetree))
+etreeU4_Seed <- doJaccard(describeEntities(etreeUnprioritised4, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+etreeUnprioritised5 <- unprioritisedBrowsing(etreeUnprioritised4, endpointetree)
+etreeU5_4<- doJaccard(describeEntities(etreeUnprioritised5, endpointetree), describeEntities(etreeUnprioritised4, endpointetree))
+etreeU5_Seed <- doJaccard(describeEntities(etreeUnprioritised5, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+etreeUnprioritised6 <- unprioritisedBrowsing(etreeUnprioritised5, endpointetree)
+etreeU6_5<- doJaccard(describeEntities(etreeUnprioritised6, endpointetree), describeEntities(etreeUnprioritised5, endpointetree))
+etreeU6_Seed <- doJaccard(describeEntities(etreeUnprioritised6, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+etreeUnprioritised7 <- unprioritisedBrowsing(etreeUnprioritised6, endpointetree)
+etreeU7_6<- doJaccard(describeEntities(etreeUnprioritised7, endpointetree), describeEntities(etreeUnprioritised6, endpointetree))
+etreeU7_Seed <- doJaccard(describeEntities(etreeUnprioritised7, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+etreeUnprioritised8 <- unprioritisedBrowsing(etreeUnprioritised7, endpointetree)
+etreeU8_7<- doJaccard(describeEntities(etreeUnprioritised8, endpointetree), describeEntities(etreeUnprioritised7, endpointetree))
+etreeU8_Seed <- doJaccard(describeEntities(etreeUnprioritised8, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+etreeUnprioritised9 <- unprioritisedBrowsing(etreeUnprioritised8, endpointetree)
+etreeU9_8<- doJaccard(describeEntities(etreeUnprioritised9, endpointetree), describeEntities(etreeUnprioritised8, endpointetree))
+etreeU9_Seed <- doJaccard(describeEntities(etreeUnprioritised9, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+etreeUnprioritised10 <- unprioritisedBrowsing(etreeUnprioritised9, endpointetree)
+etreeU10_9<- doJaccard(describeEntities(etreeUnprioritised10, endpointetree), describeEntities(etreeUnprioritised9, endpointetree))
+etreeU10_Seed <- doJaccard(describeEntities(etreeUnprioritised10, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+end.time <- Sys.time()
+time.taken.u <- end.time - start.time
+time.taken.u
+
+
+start.time <- Sys.time()
+
+etreeRandom1 <- randomBrowsingEtree(etreeSeedSet)
+etreeR1_Seed <- doJaccard(describeEntities(etreeRandom1, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+etreeRandom2 <- randomBrowsingEtree(etreeRandom1)
+etreeR2_1<- doJaccard(describeEntities(etreeRandom2, endpointetree), describeEntities(etreeRandom1, endpointetree))
+etreeR2_Seed <- doJaccard(describeEntities(etreeRandom2, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+etreeRandom3 <- randomBrowsingEtree(etreeRandom2)
+etreeR3_2<- doJaccard(describeEntities(etreeRandom3, endpointetree), describeEntities(etreeRandom2, endpointetree))
+etreeR3_Seed <- doJaccard(describeEntities(etreeRandom3, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+etreeRandom4 <- randomBrowsingEtree(etreeRandom3)
+etreeR4_3<- doJaccard(describeEntities(etreeRandom4, endpointetree), describeEntities(etreeRandom3, endpointetree))
+etreeR4_Seed <- doJaccard(describeEntities(etreeRandom4, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+etreeRandom5 <- randomBrowsingEtree(etreeRandom4)
+etreeR5_4<- doJaccard(describeEntities(etreeRandom5, endpointetree), describeEntities(etreeRandom4, endpointetree))
+etreeR5_Seed <- doJaccard(describeEntities(etreeRandom5, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+etreeRandom6 <- randomBrowsingEtree(etreeRandom5)
+etreeR6_5<- doJaccard(describeEntities(etreeRandom6, endpointetree), describeEntities(etreeRandom5, endpointetree))
+etreeR6_Seed <- doJaccard(describeEntities(etreeRandom6, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+etreeRandom7 <- randomBrowsingEtree(etreeRandom6)
+etreeR7_6<- doJaccard(describeEntities(etreeRandom7, endpointetree), describeEntities(etreeRandom6, endpointetree))
+etreeR7_Seed <- doJaccard(describeEntities(etreeRandom7, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+etreeRandom8 <- randomBrowsingEtree(etreeRandom7)
+etreeR8_7<- doJaccard(describeEntities(etreeRandom8, endpointetree), describeEntities(etreeRandom7, endpointetree))
+etreeR8_Seed <- doJaccard(describeEntities(etreeRandom8, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+etreeRandom9 <- randomBrowsingEtree(etreeRandom8)
+etreeR9_8<- doJaccard(describeEntities(etreeRandom9, endpointetree), describeEntities(etreeRandom8, endpointetree))
+etreeR9_Seed <- doJaccard(describeEntities(etreeRandom9, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+etreeRandom10 <- randomBrowsingEtree(etreeRandom9)
+etreeR10_9<- doJaccard(describeEntities(etreeRandom10, endpointetree), describeEntities(etreeRandom9, endpointetree))
+etreeR10_Seed <- doJaccard(describeEntities(etreeRandom10, endpointetree), describeEntities(etreeSeedSet, endpointetree))
+
+end.time <- Sys.time()
+time.taken.r <- end.time - start.time
+time.taken.r
+```
+
+
+### SEED SIMILARITY PLOTS -- EEBOO
+
+```{r}
+eebooP1_plot <- ggplot(eebooP1_Seed, aes(j)) + geom_density() + geom_text(x=0, y=0, label = "eebooP1") + ylim(0,10)
+eebooP2_plot <- ggplot(eebooP2_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooP2")+ ylim(0,10)
+eebooP3_plot <- ggplot(eebooP3_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooP3")+ ylim(0,10)
+eebooP4_plot <- ggplot(eebooP4_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooP4")+ ylim(0,10)
+eebooP5_plot <- ggplot(eebooP5_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooP5")+ ylim(0,10)
+eebooP6_plot <- ggplot(eebooP6_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooP6")+ ylim(0,10)
+eebooP7_plot <- ggplot(eebooP7_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooP7")+ ylim(0,10)
+eebooP8_plot <- ggplot(eebooP8_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooP8")+ ylim(0,10)
+eebooP9_plot <- ggplot(eebooP9_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooP9")+ ylim(0,10)
+eebooP10_plot <- ggplot(eebooP10_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooP10")+ ylim(0,10)
+
+eebooU1_plot <- ggplot(eebooU1_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooU1")+ ylim(0,10)
+eebooU2_plot <- ggplot(eebooU2_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooU2")+ ylim(0,10)
+eebooU3_plot <- ggplot(eebooU3_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooU3")+ ylim(0,10)
+eebooU4_plot <- ggplot(eebooU4_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooU4")+ ylim(0,10)
+eebooU5_plot <- ggplot(eebooU5_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooU5")+ ylim(0,10)
+eebooU6_plot <- ggplot(eebooU6_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooU6")+ ylim(0,10)
+eebooU7_plot <- ggplot(eebooU7_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooU7")+ ylim(0,10)
+eebooU8_plot <- ggplot(eebooU8_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooU8")+ ylim(0,10)
+eebooU9_plot <- ggplot(eebooU9_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooU9")+ ylim(0,10)
+eebooU10_plot <- ggplot(eebooU10_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooU10")+ ylim(0,10)
+
+eebooR1_plot <- ggplot(eebooR1_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooR1")+ ylim(0,10)
+eebooR2_plot <- ggplot(eebooR2_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooR2")+ ylim(0,10)
+eebooR3_plot <- ggplot(eebooR3_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooR3")+ ylim(0,10)
+eebooR4_plot <- ggplot(eebooR4_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooR4")+ ylim(0,10)
+eebooR5_plot <- ggplot(eebooR5_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooR5")+ ylim(0,10)
+eebooR6_plot <- ggplot(eebooR6_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooR6")+ ylim(0,10)
+eebooR7_plot <- ggplot(eebooR7_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooR7")+ ylim(0,10)
+eebooR8_plot <- ggplot(eebooR8_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooR8")+ ylim(0,10)
+eebooR9_plot <- ggplot(eebooR9_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooR9")+ ylim(0,10)
+eebooR10_plot <- ggplot(eebooR10_Seed, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooR10")+ ylim(0,10)
+
+### ITERATIVE SIMILARITY PLOTS
+eebooP2_1_plot <- ggplot(eebooP2_1, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooP2-1")+ ylim(0,10)
+eebooP3_2_plot <- ggplot(eebooP3_2, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooP3-2")+ ylim(0,10)
+eebooP4_3_plot <- ggplot(eebooP4_3, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooP4-3")+ ylim(0,10)
+eebooP5_4_plot <- ggplot(eebooP5_4, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooP5-4")+ ylim(0,10)
+eebooP6_5_plot <- ggplot(eebooP6_5, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooP6-5")+ ylim(0,10)
+eebooP7_6_plot <- ggplot(eebooP7_6, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooP7-6")+ ylim(0,10)
+eebooP8_7_plot <- ggplot(eebooP8_7, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooP8-7")+ ylim(0,10)
+eebooP9_8_plot <- ggplot(eebooP9_8, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooP9-8")+ ylim(0,10)
+eebooP10_9_plot <- ggplot(eebooP10_9, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooP10-9")+ ylim(0,10)
+
+eebooU2_1_plot <- ggplot(eebooU2_1, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooU2-1")+ ylim(0,10)
+eebooU3_2_plot <- ggplot(eebooU3_2, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooU3-2")+ ylim(0,10)
+eebooU4_3_plot <- ggplot(eebooU4_3, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooU4-3")+ ylim(0,10)
+eebooU5_4_plot <- ggplot(eebooU5_4, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooU5-4")+ ylim(0,10)
+eebooU6_5_plot <- ggplot(eebooU6_5, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooU6-5")+ ylim(0,10)
+eebooU7_6_plot <- ggplot(eebooU7_6, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooU7-6")+ ylim(0,10)
+eebooU8_7_plot <- ggplot(eebooU8_7, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooU8-7")+ ylim(0,10)
+eebooU9_8_plot <- ggplot(eebooU9_8, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooU9-8")+ ylim(0,10)
+eebooU10_9_plot <- ggplot(eebooU10_9, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooU10-9")+ ylim(0,10)
+
+eebooR2_1_plot <- ggplot(eebooR2_1, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooR2-1")+ ylim(0,10)
+eebooR3_2_plot <- ggplot(eebooR3_2, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooR3-2")+ ylim(0,10)
+eebooR4_3_plot <- ggplot(eebooR4_3, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooR4-3")+ ylim(0,10)
+eebooR5_4_plot <- ggplot(eebooR5_4, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooR5-4")+ ylim(0,10)
+eebooR6_5_plot <- ggplot(eebooR6_5, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooR6-5")+ ylim(0,10)
+eebooR7_6_plot <- ggplot(eebooR7_6, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooR7-6")+ ylim(0,10)
+eebooR8_7_plot <- ggplot(eebooR8_7, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooR8-7")+ ylim(0,10)
+eebooR9_8_plot <- ggplot(eebooR9_8, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooR9-8")+ ylim(0,10)
+eebooR10_9_plot <- ggplot(eebooR10_9, aes(j)) + geom_density()+ geom_text(x=0, y=0, label = "eebooR10-9")+ ylim(0,10)
+
+
+
+## arranged -- seed
+grid.arrange(eebooP1_plot, eebooP2_plot, eebooP3_plot, eebooP4_plot, eebooP5_plot, eebooP6_plot, eebooP7_plot, eebooP8_plot, eebooP9_plot, eebooP10_plot, ncol=1)
+
+grid.arrange(eebooU1_plot, eebooU2_plot, eebooU3_plot, eebooU4_plot, eebooU5_plot, eebooU6_plot, eebooU7_plot, eebooU8_plot, eebooU9_plot, eebooU10_plot, ncol=1)
+
+grid.arrange(eebooR1_plot, eebooR2_plot, eebooR3_plot, eebooR4_plot, eebooR5_plot, eebooR6_plot, eebooR7_plot, eebooR8_plot, eebooR9_plot, eebooR10_plot, ncol=1) 
+
+grid.arrange(
+  eebooP1_plot, eebooU1_plot, eebooR1_plot,
+  eebooP2_plot, eebooU2_plot, eebooR2_plot,
+  eebooP3_plot, eebooU3_plot, eebooR3_plot,
+  eebooP4_plot, eebooU4_plot, eebooR4_plot,
+  eebooP5_plot, eebooU5_plot, eebooR5_plot,
+  eebooP6_plot, eebooU6_plot, eebooR6_plot,
+  eebooP7_plot, eebooU7_plot, eebooR7_plot,
+  eebooP8_plot, eebooU8_plot, eebooR8_plot,
+  eebooP9_plot, eebooU9_plot, eebooR9_plot,
+  eebooP10_plot, eebooU10_plot, eebooR10_plot,
+  ncol=3)
+
+## arranged -- iterative
+grid.arrange(eebooP2_1_plot, eebooP3_2_plot, eebooP4_3_plot, eebooP5_4_plot, eebooP6_5_plot, eebooP7_6_plot, eebooP8_7_plot, eebooP9_8_plot, eebooP10_9_plot, ncol=1)
+
+grid.arrange(eebooU2_1_plot, eebooU3_2_plot, eebooU4_3_plot, eebooU5_4_plot, eebooU6_5_plot, eebooU7_6_plot, eebooU8_7_plot, eebooU9_8_plot, eebooU10_9_plot, ncol=1)
+
+grid.arrange(eebooR2_1_plot, eebooR3_2_plot, eebooR4_3_plot, eebooR5_4_plot, eebooR6_5_plot, eebooR7_6_plot, eebooR8_7_plot, eebooR9_8_plot, eebooR10_9_plot, ncol=1)
+
+grid.arrange(
+  eebooP2_1_plot, eebooU2_1_plot, eebooR2_1_plot,
+  eebooP3_2_plot, eebooU3_2_plot, eebooR3_2_plot,
+  eebooP4_3_plot, eebooU4_3_plot, eebooR4_3_plot,
+  eebooP5_4_plot, eebooU5_4_plot, eebooR5_4_plot,
+  eebooP6_5_plot, eebooU6_5_plot, eebooR6_5_plot,
+  eebooP7_6_plot, eebooU2_1_plot, eebooR2_1_plot,
+  eebooP8_7_plot, eebooU8_7_plot, eebooR8_7_plot,
+  eebooP9_8_plot, eebooU9_8_plot, eebooR9_8_plot,
+  eebooP10_9_plot, eebooU10_9_plot, eebooR10_9_plot,
+  ncol=3)
+
+```
+### SEED SIMILARITY PLOTS -- DBPSmall
+
+```{r}
+dbpSmallP1_plot <- ggplot(dbpSmallP1_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallP1_Seed)) + geom_text(x=0, y=0, label = "dbpSmallP1") + ylim(0,20) + xlim(0, .2)
+dbpSmallP2_plot <- ggplot(dbpSmallP2_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallP2_Seed))+ geom_text(x=0, y=0, label = "dbpSmallP2")+ ylim(0,20) + xlim(0, .2)
+dbpSmallP3_plot <- ggplot(dbpSmallP3_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallP3_Seed))+ geom_text(x=0, y=0, label = "dbpSmallP3")+ ylim(0,20) + xlim(0, .2)
+dbpSmallP4_plot <- ggplot(dbpSmallP4_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallP4_Seed))+ geom_text(x=0, y=0, label = "dbpSmallP4")+ ylim(0,20) + xlim(0, .2)
+dbpSmallP5_plot <- ggplot(dbpSmallP5_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallP5_Seed))+ geom_text(x=0, y=0, label = "dbpSmallP5")+ ylim(0,20) + xlim(0, .2)
+dbpSmallP6_plot <- ggplot(dbpSmallP6_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallP6_Seed))+ geom_text(x=0, y=0, label = "dbpSmallP6")+ ylim(0,20) + xlim(0, .2)
+dbpSmallP7_plot <- ggplot(dbpSmallP7_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallP7_Seed))+ geom_text(x=0, y=0, label = "dbpSmallP7")+ ylim(0,20) + xlim(0, .2)
+dbpSmallP8_plot <- ggplot(dbpSmallP8_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallP8_Seed))+ geom_text(x=0, y=0, label = "dbpSmallP8")+ ylim(0,20) + xlim(0, .2)
+dbpSmallP9_plot <- ggplot(dbpSmallP9_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallP9_Seed))+ geom_text(x=0, y=0, label = "dbpSmallP9")+ ylim(0,20) + xlim(0, .2)
+dbpSmallP10_plot <- ggplot(dbpSmallP10_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallP10_Seed))+ geom_text(x=0, y=0, label = "dbpSmallP10")+ ylim(0,20) + xlim(0, .2)
+
+dbpSmallU1_plot <- ggplot(dbpSmallU1_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallU1_Seed))+ geom_text(x=0, y=0, label = "dbpSmallU1")+ ylim(0,20) + xlim(0, .2)
+dbpSmallU2_plot <- ggplot(dbpSmallU2_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallU2_Seed))+ geom_text(x=0, y=0, label = "dbpSmallU2")+ ylim(0,20) + xlim(0, .2)
+dbpSmallU3_plot <- ggplot(dbpSmallU3_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallU3_Seed))+ geom_text(x=0, y=0, label = "dbpSmallU3")+ ylim(0,20) + xlim(0, .2)
+dbpSmallU4_plot <- ggplot(dbpSmallU4_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallU4_Seed))+ geom_text(x=0, y=0, label = "dbpSmallU4")+ ylim(0,20) + xlim(0, .2)
+dbpSmallU5_plot <- ggplot(dbpSmallU5_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallU5_Seed))+ geom_text(x=0, y=0, label = "dbpSmallU5")+ ylim(0,20) + xlim(0, .2)
+dbpSmallU6_plot <- ggplot(dbpSmallU6_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallU6_Seed))+ geom_text(x=0, y=0, label = "dbpSmallU6")+ ylim(0,20) + xlim(0, .2)
+dbpSmallU7_plot <- ggplot(dbpSmallU7_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallU7_Seed))+ geom_text(x=0, y=0, label = "dbpSmallU7")+ ylim(0,20) + xlim(0, .2)
+dbpSmallU8_plot <- ggplot(dbpSmallU8_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallU8_Seed))+ geom_text(x=0, y=0, label = "dbpSmallU8")+ ylim(0,20) + xlim(0, .2)
+dbpSmallU9_plot <- ggplot(dbpSmallU9_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallU9_Seed))+ geom_text(x=0, y=0, label = "dbpSmallU9")+ ylim(0,20) + xlim(0, .2)
+dbpSmallU10_plot <- ggplot(dbpSmallU10_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallU10_Seed))+ geom_text(x=0, y=0, label = "dbpSmallU10")+ ylim(0,20) + xlim(0, .2)
+
+dbpSmallR1_plot <- ggplot(dbpSmallR1_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallR1_Seed))+ geom_text(x=0, y=0, label = "dbpSmallR1")+ ylim(0,20) + xlim(0, .2)
+dbpSmallR2_plot <- ggplot(dbpSmallR2_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallR2_Seed))+ geom_text(x=0, y=0, label = "dbpSmallR2")+ ylim(0,20) + xlim(0, .2)
+dbpSmallR3_plot <- ggplot(dbpSmallR3_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallR3_Seed))+ geom_text(x=0, y=0, label = "dbpSmallR3")+ ylim(0,20) + xlim(0, .2)
+dbpSmallR4_plot <- ggplot(dbpSmallR4_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallR4_Seed))+ geom_text(x=0, y=0, label = "dbpSmallR4")+ ylim(0,20) + xlim(0, .2)
+dbpSmallR5_plot <- ggplot(dbpSmallR5_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallR5_Seed))+ geom_text(x=0, y=0, label = "dbpSmallR5")+ ylim(0,20) + xlim(0, .2)
+dbpSmallR6_plot <- ggplot(dbpSmallR6_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallR6_Seed))+ geom_text(x=0, y=0, label = "dbpSmallR6")+ ylim(0,20) + xlim(0, .2)
+dbpSmallR7_plot <- ggplot(dbpSmallR7_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallR7_Seed))+ geom_text(x=0, y=0, label = "dbpSmallR7")+ ylim(0,20) + xlim(0, .2)
+dbpSmallR8_plot <- ggplot(dbpSmallR8_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallR8_Seed))+ geom_text(x=0, y=0, label = "dbpSmallR8")+ ylim(0,20) + xlim(0, .2)
+dbpSmallR9_plot <- ggplot(dbpSmallR9_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallR9_Seed))+ geom_text(x=0, y=0, label = "dbpSmallR9")+ ylim(0,20) + xlim(0, .2)
+dbpSmallR10_plot <- ggplot(dbpSmallR10_Seed, aes(j)) + geom_histogram(bins=nrow(dbpSmallR10_Seed))+ geom_text(x=0, y=0, label = "dbpSmallR10")+ ylim(0,20) + xlim(0, .2)
+
+## ITERATIVE SIMILARITY PLOTS
+dbpSmallP2_1_plot <- ggplot(dbpSmallP2_1, aes(j)) + geom_histogram(bins=nrow(dbpSmallP2_1))+ geom_text(x=0, y=0, label = "dbpSmallP2-1")+ ylim(0,20) + xlim(0, .2)
+dbpSmallP3_2_plot <- ggplot(dbpSmallP3_2, aes(j)) + geom_histogram(bins=nrow(dbpSmallP3_2))+ geom_text(x=0, y=0, label = "dbpSmallP3-2")+ ylim(0,20) + xlim(0, .2)
+dbpSmallP4_3_plot <- ggplot(dbpSmallP4_3, aes(j)) + geom_histogram(bins=nrow(dbpSmallP4_3))+ geom_text(x=0, y=0, label = "dbpSmallP4-3")+ ylim(0,20) + xlim(0, .2)
+dbpSmallP5_4_plot <- ggplot(dbpSmallP5_4, aes(j)) + geom_histogram(bins=nrow(dbpSmallP5_4))+ geom_text(x=0, y=0, label = "dbpSmallP5-4")+ ylim(0,20) + xlim(0, .2)
+dbpSmallP6_5_plot <- ggplot(dbpSmallP6_5, aes(j)) + geom_histogram(bins=nrow(dbpSmallP6_5))+ geom_text(x=0, y=0, label = "dbpSmallP6-5")+ ylim(0,20) + xlim(0, .2)
+dbpSmallP7_6_plot <- ggplot(dbpSmallP7_6, aes(j)) + geom_histogram(bins=nrow(dbpSmallP7_6))+ geom_text(x=0, y=0, label = "dbpSmallP7-6")+ ylim(0,20) + xlim(0, .2)
+dbpSmallP8_7_plot <- ggplot(dbpSmallP8_7, aes(j)) + geom_histogram(bins=nrow(dbpSmallP8_7))+ geom_text(x=0, y=0, label = "dbpSmallP8-7")+ ylim(0,20) + xlim(0, .2)
+dbpSmallP9_8_plot <- ggplot(dbpSmallP9_8, aes(j)) + geom_histogram(bins=nrow(dbpSmallP9_8))+ geom_text(x=0, y=0, label = "dbpSmallP9-8")+ ylim(0,20) + xlim(0, .2)
+dbpSmallP10_9_plot <- ggplot(dbpSmallP10_9, aes(j)) + geom_histogram(bins=nrow(dbpSmallP10_9))+ geom_text(x=0, y=0, label = "dbpSmallP10-9")+ ylim(0,20) + xlim(0, .2)
+
+dbpSmallU2_1_plot <- ggplot(dbpSmallU2_1, aes(j)) + geom_histogram(bins=nrow(dbpSmallU2_1))+ geom_text(x=0, y=0, label = "dbpSmallU2-1")+ ylim(0,20) + xlim(0, .2)
+dbpSmallU3_2_plot <- ggplot(dbpSmallU3_2, aes(j)) + geom_histogram(bins=nrow(dbpSmallU3_2))+ geom_text(x=0, y=0, label = "dbpSmallU3-2")+ ylim(0,20) + xlim(0, .2)
+dbpSmallU4_3_plot <- ggplot(dbpSmallU4_3, aes(j)) + geom_histogram(bins=nrow(dbpSmallU4_3))+ geom_text(x=0, y=0, label = "dbpSmallU4-3")+ ylim(0,20) + xlim(0, .2)
+dbpSmallU5_4_plot <- ggplot(dbpSmallU5_4, aes(j)) + geom_histogram(bins=nrow(dbpSmallU5_4))+ geom_text(x=0, y=0, label = "dbpSmallU5-4")+ ylim(0,20) + xlim(0, .2)
+dbpSmallU6_5_plot <- ggplot(dbpSmallU6_5, aes(j)) + geom_histogram(bins=nrow(dbpSmallU6_5))+ geom_text(x=0, y=0, label = "dbpSmallU6-5")+ ylim(0,20) + xlim(0, .2)
+dbpSmallU7_6_plot <- ggplot(dbpSmallU7_6, aes(j)) + geom_histogram(bins=nrow(dbpSmallU7_6))+ geom_text(x=0, y=0, label = "dbpSmallU7-6")+ ylim(0,20) + xlim(0, .2)
+dbpSmallU8_7_plot <- ggplot(dbpSmallU8_7, aes(j)) + geom_histogram(bins=nrow(dbpSmallU8_7))+ geom_text(x=0, y=0, label = "dbpSmallU8-7")+ ylim(0,20) + xlim(0, .2)
+dbpSmallU9_8_plot <- ggplot(dbpSmallU9_8, aes(j)) + geom_histogram(bins=nrow(dbpSmallU9_8))+ geom_text(x=0, y=0, label = "dbpSmallU9-8")+ ylim(0,20) + xlim(0, .2)
+dbpSmallU10_9_plot <- ggplot(dbpSmallU10_9, aes(j)) + geom_histogram(bins=nrow(dbpSmallU10_9))+ geom_text(x=0, y=0, label = "dbpSmallU10-9")+ ylim(0,20) + xlim(0, .2)
+
+dbpSmallR2_1_plot <- ggplot(dbpSmallR2_1, aes(j)) + geom_histogram(bins=nrow(dbpSmallR2_1))+ geom_text(x=0, y=0, label = "dbpSmallR2-1")+ ylim(0,30) + xlim(0, .2)
+dbpSmallR3_2_plot <- ggplot(dbpSmallR3_2, aes(j)) + geom_histogram(bins=nrow(dbpSmallR3_2))+ geom_text(x=0, y=0, label = "dbpSmallR3-2")+ ylim(0,30) + xlim(0, .2)
+dbpSmallR4_3_plot <- ggplot(dbpSmallR4_3, aes(j)) + geom_histogram(bins=nrow(dbpSmallR4_3))+ geom_text(x=0, y=0, label = "dbpSmallR4-3")+ ylim(0,30) + xlim(0, .2)
+dbpSmallR5_4_plot <- ggplot(dbpSmallR5_4, aes(j)) + geom_histogram(bins=nrow(dbpSmallR5_4))+ geom_text(x=0, y=0, label = "dbpSmallR5-4")+ ylim(0,30) + xlim(0, .2)
+dbpSmallR6_5_plot <- ggplot(dbpSmallR6_5, aes(j)) + geom_histogram(bins=nrow(dbpSmallR6_5))+ geom_text(x=0, y=0, label = "dbpSmallR6-5")+ ylim(0,30) + xlim(0, .2)
+dbpSmallR7_6_plot <- ggplot(dbpSmallR7_6, aes(j)) + geom_histogram(bins=nrow(dbpSmallR7_6))+ geom_text(x=0, y=0, label = "dbpSmallR7-6")+ ylim(0,30) + xlim(0, .2)
+dbpSmallR8_7_plot <- ggplot(dbpSmallR8_7, aes(j)) + geom_histogram(bins=nrow(dbpSmallR8_7))+ geom_text(x=0, y=0, label = "dbpSmallR8-7")+ ylim(0,30) + xlim(0, .2)
+dbpSmallR9_8_plot <- ggplot(dbpSmallR9_8, aes(j)) + geom_histogram(bins=nrow(dbpSmallR9_8))+ geom_text(x=0, y=0, label = "dbpSmallR9-8")+ ylim(0,30) + xlim(0, .2)
+dbpSmallR10_9_plot <- ggplot(dbpSmallR10_9, aes(j)) + geom_histogram(bins=nrow(dbpSmallR10_9))+ geom_text(x=0, y=0, label = "dbpSmallR10-9")+ ylim(0,30) + xlim(0, .2)
+
+combinedDbpSmallU_Seed <-as.tibble(
+  rbind(
+    cbind(dbpSmallU1_Seed$j, "1"),
+    cbind(dbpSmallU2_Seed$j, "2"),
+    cbind(dbpSmallU3_Seed$j, "3"),
+    cbind(dbpSmallU4_Seed$j, "4"),
+    cbind(dbpSmallU5_Seed$j, "5"),
+    cbind(dbpSmallU6_Seed$j, "6"),
+    cbind(dbpSmallU7_Seed$j, "7"),
+    cbind(dbpSmallU8_Seed$j, "8"),
+    cbind(dbpSmallU9_Seed$j, "9"),
+    cbind(dbpSmallU10_Seed$j, "10")
+  ), 
+)
+names(combinedDbpSmallU_Seed) <- c("score", "step")
+combinedDbpSmallU_Seed$score <- as.numeric(combinedDbpSmallU_Seed$score)
+ggplot(combinedDbpSmallU_Seed, aes()) + geom_boxplot(aes(group=step, y=score, x=1)) 
+
+
+## arranged -- seed
+grid.arrange(dbpSmallP1_plot, dbpSmallP2_plot, dbpSmallP3_plot, dbpSmallP4_plot, dbpSmallP5_plot, dbpSmallP6_plot, dbpSmallP7_plot, dbpSmallP8_plot, dbpSmallP9_plot, dbpSmallP10_plot, ncol=1)
+
+grid.arrange(dbpSmallU1_plot, dbpSmallU2_plot, dbpSmallU3_plot, dbpSmallU4_plot, dbpSmallU5_plot, dbpSmallU6_plot, dbpSmallU7_plot, dbpSmallU8_plot, dbpSmallU9_plot, dbpSmallU10_plot, ncol=1)
+
+grid.arrange(dbpSmallR1_plot, dbpSmallR2_plot, dbpSmallR3_plot, dbpSmallR4_plot, dbpSmallR5_plot, dbpSmallR6_plot, dbpSmallR7_plot, dbpSmallR8_plot, dbpSmallR9_plot, dbpSmallR10_plot, ncol=1) 
+
+grid.arrange(
+  dbpSmallP1_plot, dbpSmallU1_plot, dbpSmallR1_plot,
+  dbpSmallP2_plot, dbpSmallU2_plot, dbpSmallR2_plot,
+  dbpSmallP3_plot, dbpSmallU3_plot, dbpSmallR3_plot,
+  dbpSmallP4_plot, dbpSmallU4_plot, dbpSmallR4_plot,
+  dbpSmallP5_plot, dbpSmallU5_plot, dbpSmallR5_plot,
+  dbpSmallP6_plot, dbpSmallU6_plot, dbpSmallR6_plot,
+  dbpSmallP7_plot, dbpSmallU7_plot, dbpSmallR7_plot,
+  dbpSmallP8_plot, dbpSmallU8_plot, dbpSmallR8_plot,
+  dbpSmallP9_plot, dbpSmallU9_plot, dbpSmallR9_plot,
+  dbpSmallP10_plot, dbpSmallU10_plot, dbpSmallR10_plot,
+  ncol=3)
+
+## arranged -- iterative
+grid.arrange(dbpSmallP2_1_plot, dbpSmallP3_2_plot, dbpSmallP4_3_plot, dbpSmallP5_4_plot, dbpSmallP6_5_plot, dbpSmallP7_6_plot, dbpSmallP8_7_plot, dbpSmallP9_8_plot, dbpSmallP10_9_plot, ncol=1)
+
+grid.arrange(dbpSmallU2_1_plot, dbpSmallU3_2_plot, dbpSmallU4_3_plot, dbpSmallU5_4_plot, dbpSmallU6_5_plot, dbpSmallU7_6_plot, dbpSmallU8_7_plot, dbpSmallU9_8_plot, dbpSmallU10_9_plot, ncol=1)
+
+grid.arrange(dbpSmallR2_1_plot, dbpSmallR3_2_plot, dbpSmallR4_3_plot, dbpSmallR5_4_plot, dbpSmallR6_5_plot, dbpSmallR7_6_plot, dbpSmallR8_7_plot, dbpSmallR9_8_plot, dbpSmallR10_9_plot, ncol=1)
+
+grid.arrange(
+  dbpSmallP2_1_plot, dbpSmallU2_1_plot, dbpSmallR2_1_plot,
+  dbpSmallP3_2_plot, dbpSmallU3_2_plot, dbpSmallR3_2_plot,
+  dbpSmallP4_3_plot, dbpSmallU4_3_plot, dbpSmallR4_3_plot,
+  dbpSmallP5_4_plot, dbpSmallU5_4_plot, dbpSmallR5_4_plot,
+  dbpSmallP6_5_plot, dbpSmallU6_5_plot, dbpSmallR6_5_plot,
+  dbpSmallP7_6_plot, dbpSmallU2_1_plot, dbpSmallR2_1_plot,
+  dbpSmallP8_7_plot, dbpSmallU8_7_plot, dbpSmallR8_7_plot,
+  dbpSmallP9_8_plot, dbpSmallU9_8_plot, dbpSmallR9_8_plot,
+  dbpSmallP10_9_plot, dbpSmallU10_9_plot, dbpSmallR10_9_plot,
+  ncol=3)
+
+```
+
+### SEED SIMILARITY PLOTS -- DBPHuge
+
+```{r}
+dbpHugeP1_plot <- ggplot(dbpHugeP1_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeP1_Seed)) + geom_text(x=0, y=0, label = "dbpHugeP1") + ylim(0,10) + xlim(0, .25)
+dbpHugeP2_plot <- ggplot(dbpHugeP2_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeP2_Seed))+ geom_text(x=0, y=0, label = "dbpHugeP2")+ ylim(0,10) + xlim(0, .25)
+dbpHugeP3_plot <- ggplot(dbpHugeP3_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeP3_Seed))+ geom_text(x=0, y=0, label = "dbpHugeP3")+ ylim(0,10) + xlim(0, .25)
+dbpHugeP4_plot <- ggplot(dbpHugeP4_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeP4_Seed))+ geom_text(x=0, y=0, label = "dbpHugeP4")+ ylim(0,10) + xlim(0, .25)
+dbpHugeP5_plot <- ggplot(dbpHugeP5_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeP5_Seed))+ geom_text(x=0, y=0, label = "dbpHugeP5")+ ylim(0,10) + xlim(0, .25)
+dbpHugeP6_plot <- ggplot(dbpHugeP6_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeP6_Seed))+ geom_text(x=0, y=0, label = "dbpHugeP6")+ ylim(0,10) + xlim(0, .25)
+dbpHugeP7_plot <- ggplot(dbpHugeP7_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeP7_Seed))+ geom_text(x=0, y=0, label = "dbpHugeP7")+ ylim(0,10) + xlim(0, .25)
+dbpHugeP8_plot <- ggplot(dbpHugeP8_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeP8_Seed))+ geom_text(x=0, y=0, label = "dbpHugeP8")+ ylim(0,10) + xlim(0, .25)
+dbpHugeP9_plot <- ggplot(dbpHugeP9_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeP9_Seed))+ geom_text(x=0, y=0, label = "dbpHugeP9")+ ylim(0,10) + xlim(0, .25)
+dbpHugeP10_plot <- ggplot(dbpHugeP10_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeP10_Seed))+ geom_text(x=0, y=0, label = "dbpHugeP10")+ ylim(0,10) + xlim(0, .25)
+
+dbpHugeU1_plot <- ggplot(dbpHugeU1_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeU1_Seed))+ geom_text(x=0, y=0, label = "dbpHugeU1")+ ylim(0,10) + xlim(0, .25)
+dbpHugeU2_plot <- ggplot(dbpHugeU2_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeU2_Seed))+ geom_text(x=0, y=0, label = "dbpHugeU2")+ ylim(0,10) + xlim(0, .25)
+dbpHugeU3_plot <- ggplot(dbpHugeU3_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeU3_Seed))+ geom_text(x=0, y=0, label = "dbpHugeU3")+ ylim(0,10) + xlim(0, .25)
+dbpHugeU4_plot <- ggplot(dbpHugeU4_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeU4_Seed))+ geom_text(x=0, y=0, label = "dbpHugeU4")+ ylim(0,10) + xlim(0, .25)
+dbpHugeU5_plot <- ggplot(dbpHugeU5_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeU5_Seed))+ geom_text(x=0, y=0, label = "dbpHugeU5")+ ylim(0,10) + xlim(0, .25)
+dbpHugeU6_plot <- ggplot(dbpHugeU6_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeU6_Seed))+ geom_text(x=0, y=0, label = "dbpHugeU6")+ ylim(0,10) + xlim(0, .25)
+dbpHugeU7_plot <- ggplot(dbpHugeU7_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeU7_Seed))+ geom_text(x=0, y=0, label = "dbpHugeU7")+ ylim(0,10) + xlim(0, .25)
+dbpHugeU8_plot <- ggplot(dbpHugeU8_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeU8_Seed))+ geom_text(x=0, y=0, label = "dbpHugeU8")+ ylim(0,10) + xlim(0, .25)
+dbpHugeU9_plot <- ggplot(dbpHugeU9_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeU9_Seed))+ geom_text(x=0, y=0, label = "dbpHugeU9")+ ylim(0,10) + xlim(0, .25)
+dbpHugeU10_plot <- ggplot(dbpHugeU10_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeU10_Seed))+ geom_text(x=0, y=0, label = "dbpHugeU10")+ ylim(0,10) + xlim(0, .25)
+
+dbpHugeR1_plot <- ggplot(dbpHugeR1_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeR1_Seed))+ geom_text(x=0, y=0, label = "dbpHugeR1")+ ylim(0,10) + xlim(0, .25)
+dbpHugeR2_plot <- ggplot(dbpHugeR2_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeR2_Seed))+ geom_text(x=0, y=0, label = "dbpHugeR2")+ ylim(0,10) + xlim(0, .25)
+dbpHugeR3_plot <- ggplot(dbpHugeR3_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeR3_Seed))+ geom_text(x=0, y=0, label = "dbpHugeR3")+ ylim(0,10) + xlim(0, .25)
+dbpHugeR4_plot <- ggplot(dbpHugeR4_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeR4_Seed))+ geom_text(x=0, y=0, label = "dbpHugeR4")+ ylim(0,10) + xlim(0, .25)
+dbpHugeR5_plot <- ggplot(dbpHugeR5_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeR5_Seed))+ geom_text(x=0, y=0, label = "dbpHugeR5")+ ylim(0,10) + xlim(0, .25)
+dbpHugeR6_plot <- ggplot(dbpHugeR6_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeR6_Seed))+ geom_text(x=0, y=0, label = "dbpHugeR6")+ ylim(0,10) + xlim(0, .25)
+dbpHugeR7_plot <- ggplot(dbpHugeR7_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeR7_Seed))+ geom_text(x=0, y=0, label = "dbpHugeR7")+ ylim(0,10) + xlim(0, .25)
+dbpHugeR8_plot <- ggplot(dbpHugeR8_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeR8_Seed))+ geom_text(x=0, y=0, label = "dbpHugeR8")+ ylim(0,10) + xlim(0, .25)
+dbpHugeR9_plot <- ggplot(dbpHugeR9_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeR9_Seed))+ geom_text(x=0, y=0, label = "dbpHugeR9")+ ylim(0,10) + xlim(0, .25)
+dbpHugeR10_plot <- ggplot(dbpHugeR10_Seed, aes(j)) + geom_histogram(bins=nrow(dbpHugeR10_Seed))+ geom_text(x=0, y=0, label = "dbpHugeR10")+ ylim(0,10) + xlim(0, .25)
+
+### ITERATIVE SIMILARITY PLOTS
+dbpHugeP2_1_plot <- ggplot(dbpHugeP2_1, aes(j)) + geom_histogram(bins=nrow(dbpHugeP2_1))+ geom_text(x=0, y=0, label = "dbpHugeP2-1")+ ylim(0,10) + xlim(0, .25)
+dbpHugeP3_2_plot <- ggplot(dbpHugeP3_2, aes(j)) + geom_histogram(bins=nrow(dbpHugeP3_2))+ geom_text(x=0, y=0, label = "dbpHugeP3-2")+ ylim(0,10) + xlim(0, .25)
+dbpHugeP4_3_plot <- ggplot(dbpHugeP4_3, aes(j)) + geom_histogram(bins=nrow(dbpHugeP4_3))+ geom_text(x=0, y=0, label = "dbpHugeP4-3")+ ylim(0,10) + xlim(0, .25)
+dbpHugeP5_4_plot <- ggplot(dbpHugeP5_4, aes(j)) + geom_histogram(bins=nrow(dbpHugeP5_4))+ geom_text(x=0, y=0, label = "dbpHugeP5-4")+ ylim(0,10) + xlim(0, .25)
+dbpHugeP6_5_plot <- ggplot(dbpHugeP6_5, aes(j)) + geom_histogram(bins=nrow(dbpHugeP6_5))+ geom_text(x=0, y=0, label = "dbpHugeP6-5")+ ylim(0,10) + xlim(0, .25)
+dbpHugeP7_6_plot <- ggplot(dbpHugeP7_6, aes(j)) + geom_histogram(bins=nrow(dbpHugeP7_6))+ geom_text(x=0, y=0, label = "dbpHugeP7-6")+ ylim(0,10) + xlim(0, .25)
+dbpHugeP8_7_plot <- ggplot(dbpHugeP8_7, aes(j)) + geom_histogram(bins=nrow(dbpHugeP8_7))+ geom_text(x=0, y=0, label = "dbpHugeP8-7")+ ylim(0,10) + xlim(0, .25)
+dbpHugeP9_8_plot <- ggplot(dbpHugeP9_8, aes(j)) + geom_histogram(bins=nrow(dbpHugeP9_8))+ geom_text(x=0, y=0, label = "dbpHugeP9-8")+ ylim(0,10) + xlim(0, .25)
+dbpHugeP10_9_plot <- ggplot(dbpHugeP10_9, aes(j)) + geom_histogram(bins=nrow(dbpHugeP10_9))+ geom_text(x=0, y=0, label = "dbpHugeP10-9")+ ylim(0,10) + xlim(0, .25)
+
+dbpHugeU2_1_plot <- ggplot(dbpHugeU2_1, aes(j)) + geom_histogram(bins=nrow(dbpHugeU2_1))+ geom_text(x=0, y=0, label = "dbpHugeU2-1")+ ylim(0,10) + xlim(0, .25)
+dbpHugeU3_2_plot <- ggplot(dbpHugeU3_2, aes(j)) + geom_histogram(bins=nrow(dbpHugeU3_2))+ geom_text(x=0, y=0, label = "dbpHugeU3-2")+ ylim(0,10) + xlim(0, .25)
+dbpHugeU4_3_plot <- ggplot(dbpHugeU4_3, aes(j)) + geom_histogram(bins=nrow(dbpHugeU4_3))+ geom_text(x=0, y=0, label = "dbpHugeU4-3")+ ylim(0,10) + xlim(0, .25)
+dbpHugeU5_4_plot <- ggplot(dbpHugeU5_4, aes(j)) + geom_histogram(bins=nrow(dbpHugeU5_4))+ geom_text(x=0, y=0, label = "dbpHugeU5-4")+ ylim(0,10) + xlim(0, .25)
+dbpHugeU6_5_plot <- ggplot(dbpHugeU6_5, aes(j)) + geom_histogram(bins=nrow(dbpHugeU6_5))+ geom_text(x=0, y=0, label = "dbpHugeU6-5")+ ylim(0,10) + xlim(0, .25)
+dbpHugeU7_6_plot <- ggplot(dbpHugeU7_6, aes(j)) + geom_histogram(bins=nrow(dbpHugeU7_6))+ geom_text(x=0, y=0, label = "dbpHugeU7-6")+ ylim(0,10) + xlim(0, .25)
+dbpHugeU8_7_plot <- ggplot(dbpHugeU8_7, aes(j)) + geom_histogram(bins=nrow(dbpHugeU8_7))+ geom_text(x=0, y=0, label = "dbpHugeU8-7")+ ylim(0,10) + xlim(0, .25)
+dbpHugeU9_8_plot <- ggplot(dbpHugeU9_8, aes(j)) + geom_histogram(bins=nrow(dbpHugeU9_8))+ geom_text(x=0, y=0, label = "dbpHugeU9-8")+ ylim(0,10) + xlim(0, .25)
+dbpHugeU10_9_plot <- ggplot(dbpHugeU10_9, aes(j)) + geom_histogram(bins=nrow(dbpHugeU10_9))+ geom_text(x=0, y=0, label = "dbpHugeU10-9")+ ylim(0,10) + xlim(0, .25)
+
+dbpHugeR2_1_plot <- ggplot(dbpHugeR2_1, aes(j)) + geom_histogram(bins=nrow(dbpHugeR2_1))+ geom_text(x=0, y=0, label = "dbpHugeR2-1")+ ylim(0,10) + xlim(0, .25)
+dbpHugeR3_2_plot <- ggplot(dbpHugeR3_2, aes(j)) + geom_histogram(bins=nrow(dbpHugeR3_2))+ geom_text(x=0, y=0, label = "dbpHugeR3-2")+ ylim(0,10) + xlim(0, .25)
+dbpHugeR4_3_plot <- ggplot(dbpHugeR4_3, aes(j)) + geom_histogram(bins=nrow(dbpHugeR4_3))+ geom_text(x=0, y=0, label = "dbpHugeR4-3")+ ylim(0,10) + xlim(0, .25)
+dbpHugeR5_4_plot <- ggplot(dbpHugeR5_4, aes(j)) + geom_histogram(bins=nrow(dbpHugeR5_4))+ geom_text(x=0, y=0, label = "dbpHugeR5-4")+ ylim(0,10) + xlim(0, .25)
+dbpHugeR6_5_plot <- ggplot(dbpHugeR6_5, aes(j)) + geom_histogram(bins=nrow(dbpHugeR6_5))+ geom_text(x=0, y=0, label = "dbpHugeR6-5")+ ylim(0,10) + xlim(0, .25)
+dbpHugeR7_6_plot <- ggplot(dbpHugeR7_6, aes(j)) + geom_histogram(bins=nrow(dbpHugeR7_6))+ geom_text(x=0, y=0, label = "dbpHugeR7-6")+ ylim(0,10) + xlim(0, .25)
+dbpHugeR8_7_plot <- ggplot(dbpHugeR8_7, aes(j)) + geom_histogram(bins=nrow(dbpHugeR8_7))+ geom_text(x=0, y=0, label = "dbpHugeR8-7")+ ylim(0,10) + xlim(0, .25)
+dbpHugeR9_8_plot <- ggplot(dbpHugeR9_8, aes(j)) + geom_histogram(bins=nrow(dbpHugeR9_8))+ geom_text(x=0, y=0, label = "dbpHugeR9-8")+ ylim(0,10) + xlim(0, .25)
+dbpHugeR10_9_plot <- ggplot(dbpHugeR10_9, aes(j)) + geom_histogram(bins=nrow(dbpHugeR10_9))+ geom_text(x=0, y=0, label = "dbpHugeR10-9")+ ylim(0,10) + xlim(0, .25)
+
+
+
+## arranged -- seed
+grid.arrange(dbpHugeP1_plot, dbpHugeP2_plot, dbpHugeP3_plot, dbpHugeP4_plot, dbpHugeP5_plot, dbpHugeP6_plot, dbpHugeP7_plot, dbpHugeP8_plot, dbpHugeP9_plot, dbpHugeP10_plot, ncol=1)
+
+grid.arrange(dbpHugeU1_plot, dbpHugeU2_plot, dbpHugeU3_plot, dbpHugeU4_plot, dbpHugeU5_plot, dbpHugeU6_plot, dbpHugeU7_plot, dbpHugeU8_plot, dbpHugeU9_plot, dbpHugeU10_plot, ncol=1)
+
+grid.arrange(dbpHugeR1_plot, dbpHugeR2_plot, dbpHugeR3_plot, dbpHugeR4_plot, dbpHugeR5_plot, dbpHugeR6_plot, dbpHugeR7_plot, dbpHugeR8_plot, dbpHugeR9_plot, dbpHugeR10_plot, ncol=1) 
+
+grid.arrange(
+  dbpHugeP1_plot, dbpHugeU1_plot, dbpHugeR1_plot,
+  dbpHugeP2_plot, dbpHugeU2_plot, dbpHugeR2_plot,
+  dbpHugeP3_plot, dbpHugeU3_plot, dbpHugeR3_plot,
+  dbpHugeP4_plot, dbpHugeU4_plot, dbpHugeR4_plot,
+  dbpHugeP5_plot, dbpHugeU5_plot, dbpHugeR5_plot,
+  dbpHugeP6_plot, dbpHugeU6_plot, dbpHugeR6_plot,
+  dbpHugeP7_plot, dbpHugeU7_plot, dbpHugeR7_plot,
+  dbpHugeP8_plot, dbpHugeU8_plot, dbpHugeR8_plot,
+  dbpHugeP9_plot, dbpHugeU9_plot, dbpHugeR9_plot,
+  dbpHugeP10_plot, dbpHugeU10_plot, dbpHugeR10_plot,
+  ncol=3)
+
+## arranged -- iterative
+grid.arrange(dbpHugeP2_1_plot, dbpHugeP3_2_plot, dbpHugeP4_3_plot, dbpHugeP5_4_plot, dbpHugeP6_5_plot, dbpHugeP7_6_plot, dbpHugeP8_7_plot, dbpHugeP9_8_plot, dbpHugeP10_9_plot, ncol=1)
+
+grid.arrange(dbpHugeU2_1_plot, dbpHugeU3_2_plot, dbpHugeU4_3_plot, dbpHugeU5_4_plot, dbpHugeU6_5_plot, dbpHugeU7_6_plot, dbpHugeU8_7_plot, dbpHugeU9_8_plot, dbpHugeU10_9_plot, ncol=1)
+
+grid.arrange(dbpHugeR2_1_plot, dbpHugeR3_2_plot, dbpHugeR4_3_plot, dbpHugeR5_4_plot, dbpHugeR6_5_plot, dbpHugeR7_6_plot, dbpHugeR8_7_plot, dbpHugeR9_8_plot, dbpHugeR10_9_plot, ncol=1)
+
+grid.arrange(
+  dbpHugeP2_1_plot, dbpHugeU2_1_plot, dbpHugeR2_1_plot,
+  dbpHugeP3_2_plot, dbpHugeU3_2_plot, dbpHugeR3_2_plot,
+  dbpHugeP4_3_plot, dbpHugeU4_3_plot, dbpHugeR4_3_plot,
+  dbpHugeP5_4_plot, dbpHugeU5_4_plot, dbpHugeR5_4_plot,
+  dbpHugeP6_5_plot, dbpHugeU6_5_plot, dbpHugeR6_5_plot,
+  dbpHugeP7_6_plot, dbpHugeU2_1_plot, dbpHugeR2_1_plot,
+  dbpHugeP8_7_plot, dbpHugeU8_7_plot, dbpHugeR8_7_plot,
+  dbpHugeP9_8_plot, dbpHugeU9_8_plot, dbpHugeR9_8_plot,
+  dbpHugeP10_9_plot, dbpHugeU10_9_plot, dbpHugeR10_9_plot,
+  ncol=3)
+
+```
+
+
+
+```
+Evaluation:
+For each data set
+  * determine similarity between each iteration and its precedent
+  * determine similarity between each iteration and the seed set
+  * determine interconnectedness within each iteration
+  * determine centrality within each iteration

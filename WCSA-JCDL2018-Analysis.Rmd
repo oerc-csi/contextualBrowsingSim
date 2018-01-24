@@ -1,0 +1,936 @@
+---
+title: "WCSA JCDL2018 Analysis"
+output: html_document
+---
+```{r}
+library(tidyverse)
+library(scales)
+library(gridExtra)
+library(xtable)
+sidak <- 1 - (1-.05)^(1/30)
+step <- c(1,1,1,2,2,2,3,3,3,4,4,4,5,5,5,6,6,6,7,7,7,8,8,8,9,9,9,10,10,10)
+
+```
+
+PLOTS
+======
+
+etree_Seed
+```{r}
+etreeP_Seed <- as.tibble(
+  bind_rows(
+    bind_cols(tibble("score" = etreeP1_Seed$j), tibble("step" = rep(1, nrow(etreeP1_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = etreeP2_Seed$j), tibble("step" = rep(2, nrow(etreeP2_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = etreeP3_Seed$j), tibble("step" = rep(3, nrow(etreeP3_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = etreeP4_Seed$j), tibble("step" = rep(4, nrow(etreeP4_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = etreeP5_Seed$j), tibble("step" = rep(5, nrow(etreeP5_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = etreeP6_Seed$j), tibble("step" = rep(6, nrow(etreeP6_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = etreeP7_Seed$j), tibble("step" = rep(7, nrow(etreeP7_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = etreeP8_Seed$j), tibble("step" = rep(8, nrow(etreeP8_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = etreeP9_Seed$j), tibble("step" = rep(9, nrow(etreeP9_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = etreeP10_Seed$j), tibble("step" = rep(10, nrow(etreeP10_Seed)), strategy="Prioritised"))
+  ) 
+)
+etreeP_Seed$step <- factor(etreeP_Seed$step) 
+ggplot(etreeP_Seed, aes(step, score)) + geom_boxplot()
+
+etreeU_Seed <- as.tibble(
+  bind_rows(
+    bind_cols(tibble("score" = etreeU1_Seed$j), tibble("step" = rep(1, nrow(etreeU1_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = etreeU2_Seed$j), tibble("step" = rep(2, nrow(etreeU2_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = etreeU3_Seed$j), tibble("step" = rep(3, nrow(etreeU3_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = etreeU4_Seed$j), tibble("step" = rep(4, nrow(etreeU4_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = etreeU5_Seed$j), tibble("step" = rep(5, nrow(etreeU5_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = etreeU6_Seed$j), tibble("step" = rep(6, nrow(etreeU6_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = etreeU7_Seed$j), tibble("step" = rep(7, nrow(etreeU7_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = etreeU8_Seed$j), tibble("step" = rep(8, nrow(etreeU8_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = etreeU9_Seed$j), tibble("step" = rep(9, nrow(etreeU9_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = etreeU10_Seed$j), tibble("step" = rep(10, nrow(etreeU10_Seed)), strategy="Unprioritised"))
+  ) 
+)
+etreeU_Seed$step <- factor(etreeU_Seed$step) 
+ggplot(etreeU_Seed, aes(step, score)) + geom_boxplot()
+
+etreeR_Seed <- as.tibble(
+  bind_rows(
+    bind_cols(tibble("score" = etreeR1_Seed$j), tibble("step" = rep(1, nrow(etreeR1_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = etreeR2_Seed$j), tibble("step" = rep(2, nrow(etreeR2_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = etreeR3_Seed$j), tibble("step" = rep(3, nrow(etreeR3_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = etreeR4_Seed$j), tibble("step" = rep(4, nrow(etreeR4_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = etreeR5_Seed$j), tibble("step" = rep(5, nrow(etreeR5_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = etreeR6_Seed$j), tibble("step" = rep(6, nrow(etreeR6_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = etreeR7_Seed$j), tibble("step" = rep(7, nrow(etreeR7_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = etreeR8_Seed$j), tibble("step" = rep(8, nrow(etreeR8_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = etreeR9_Seed$j), tibble("step" = rep(9, nrow(etreeR9_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = etreeR10_Seed$j), tibble("step" = rep(10, nrow(etreeR10_Seed)), strategy="Random"))
+  ) 
+)
+etreeR_Seed$step <- factor(etreeR_Seed$step) 
+ggplot(etreeR_Seed, aes(step, score)) + geom_boxplot(outlier.alpha = .1) + geom_violin()
+
+etree_Seed <- bind_rows( etreeP_Seed, etreeU_Seed, etreeR_Seed )
+etree_Seed$strategy <- factor(etree_Seed$strategy) 
+etree_Seed$strategy <- fct_relevel(etree_Seed$strategy, c("Prioritised", "Unprioritised", "Random"))
+etree_Seed$step <- factor(etree_Seed$step)
+
+ggplot(etree_Seed, aes(step, score, fill=strategy, color=strategy)) + geom_violin() + theme_bw()
+
+```
+eeboo_Seed
+```{r}
+# combine data for all iterations per dataset/strategy combination
+eebooP_Seed <- as.tibble(
+  bind_rows(
+    bind_cols(tibble("score" = eebooP1_Seed$j), tibble("step" = rep(1, nrow(eebooP1_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = eebooP2_Seed$j), tibble("step" = rep(2, nrow(eebooP2_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = eebooP3_Seed$j), tibble("step" = rep(3, nrow(eebooP3_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = eebooP4_Seed$j), tibble("step" = rep(4, nrow(eebooP4_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = eebooP5_Seed$j), tibble("step" = rep(5, nrow(eebooP5_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = eebooP6_Seed$j), tibble("step" = rep(6, nrow(eebooP6_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = eebooP7_Seed$j), tibble("step" = rep(7, nrow(eebooP7_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = eebooP8_Seed$j), tibble("step" = rep(8, nrow(eebooP8_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = eebooP9_Seed$j), tibble("step" = rep(9, nrow(eebooP9_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = eebooP10_Seed$j), tibble("step" = rep(10, nrow(eebooP10_Seed)), strategy="Prioritised"))
+  ) 
+)
+eebooP_Seed$step <- factor(eebooP_Seed$step) 
+eebooP_Seed$strategy <- factor(eebooP_Seed$strategy) 
+
+eebooU_Seed <- as.tibble(
+  bind_rows(
+    bind_cols(tibble("score" = eebooU1_Seed$j), tibble("step" = rep(1, nrow(eebooU1_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = eebooU2_Seed$j), tibble("step" = rep(2, nrow(eebooU2_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = eebooU3_Seed$j), tibble("step" = rep(3, nrow(eebooU3_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = eebooU4_Seed$j), tibble("step" = rep(4, nrow(eebooU4_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = eebooU5_Seed$j), tibble("step" = rep(5, nrow(eebooU5_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = eebooU6_Seed$j), tibble("step" = rep(6, nrow(eebooU6_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = eebooU7_Seed$j), tibble("step" = rep(7, nrow(eebooU7_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = eebooU8_Seed$j), tibble("step" = rep(8, nrow(eebooU8_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = eebooU9_Seed$j), tibble("step" = rep(9, nrow(eebooU9_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = eebooU10_Seed$j), tibble("step" = rep(10, nrow(eebooU10_Seed)), strategy="Unprioritised"))
+  ) 
+)
+eebooU_Seed$step <- factor(eebooU_Seed$step) 
+eebooU_Seed$strategy <- factor(eebooU_Seed$strategy) 
+
+eebooR_Seed <- as.tibble(
+  bind_rows(
+    bind_cols(tibble("score" = eebooR1_Seed$j), tibble("step" = rep(1, nrow(eebooR1_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = eebooR2_Seed$j), tibble("step" = rep(2, nrow(eebooR2_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = eebooR3_Seed$j), tibble("step" = rep(3, nrow(eebooR3_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = eebooR4_Seed$j), tibble("step" = rep(4, nrow(eebooR4_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = eebooR5_Seed$j), tibble("step" = rep(5, nrow(eebooR5_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = eebooR6_Seed$j), tibble("step" = rep(6, nrow(eebooR6_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = eebooR7_Seed$j), tibble("step" = rep(7, nrow(eebooR7_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = eebooR8_Seed$j), tibble("step" = rep(8, nrow(eebooR8_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = eebooR9_Seed$j), tibble("step" = rep(9, nrow(eebooR9_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = eebooR10_Seed$j), tibble("step" = rep(10, nrow(eebooR10_Seed)), strategy="Random"))
+  ) 
+)
+eebooR_Seed$step <- factor(eebooR_Seed$step) 
+eebooR_Seed$strategy <- factor(eebooR_Seed$strategy) 
+
+eeboo_Seed <- bind_rows( eebooP_Seed, eebooU_Seed, eebooR_Seed )
+eeboo_Seed$strategy <- factor(eeboo_Seed$strategy) 
+eeboo_Seed$strategy <- fct_relevel(eeboo_Seed$strategy, c("Prioritised", "Unprioritised", "Random"))
+eeboo_Seed$step <- factor(eeboo_Seed$step)
+ggplot(eeboo_Seed, aes(step, score, fill=strategy, color=strategy)) + geom_violin() + theme_bw()
+```
+
+dbpSmall_Seed
+```{r}
+dbpSmallP_Seed <- as.tibble(
+  bind_rows(
+    bind_cols(tibble("score" = dbpSmallP1_Seed$j), tibble("step" = rep(1, nrow(dbpSmallP1_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpSmallP2_Seed$j), tibble("step" = rep(2, nrow(dbpSmallP2_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpSmallP3_Seed$j), tibble("step" = rep(3, nrow(dbpSmallP3_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpSmallP4_Seed$j), tibble("step" = rep(4, nrow(dbpSmallP4_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpSmallP5_Seed$j), tibble("step" = rep(5, nrow(dbpSmallP5_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpSmallP6_Seed$j), tibble("step" = rep(6, nrow(dbpSmallP6_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpSmallP7_Seed$j), tibble("step" = rep(7, nrow(dbpSmallP7_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpSmallP8_Seed$j), tibble("step" = rep(8, nrow(dbpSmallP8_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpSmallP9_Seed$j), tibble("step" = rep(9, nrow(dbpSmallP9_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpSmallP10_Seed$j), tibble("step" = rep(10, nrow(dbpSmallP10_Seed)), strategy="Prioritised"))
+  ) 
+)
+dbpSmallP_Seed$step <- factor(dbpSmallP_Seed$step) 
+ggplot(dbpSmallP_Seed, aes(step, score)) + geom_boxplot()
+
+dbpSmallU_Seed <- as.tibble(
+  bind_rows(
+    bind_cols(tibble("score" = dbpSmallU1_Seed$j), tibble("step" = rep(1, nrow(dbpSmallU1_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpSmallU2_Seed$j), tibble("step" = rep(2, nrow(dbpSmallU2_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpSmallU3_Seed$j), tibble("step" = rep(3, nrow(dbpSmallU3_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpSmallU4_Seed$j), tibble("step" = rep(4, nrow(dbpSmallU4_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpSmallU5_Seed$j), tibble("step" = rep(5, nrow(dbpSmallU5_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpSmallU6_Seed$j), tibble("step" = rep(6, nrow(dbpSmallU6_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpSmallU7_Seed$j), tibble("step" = rep(7, nrow(dbpSmallU7_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpSmallU8_Seed$j), tibble("step" = rep(8, nrow(dbpSmallU8_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpSmallU9_Seed$j), tibble("step" = rep(9, nrow(dbpSmallU9_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpSmallU10_Seed$j), tibble("step" = rep(10, nrow(dbpSmallU10_Seed)), strategy="Unprioritised"))
+  ) 
+)
+dbpSmallU_Seed$step <- factor(dbpSmallU_Seed$step) 
+ggplot(dbpSmallU_Seed, aes(step, score)) + geom_boxplot()
+
+dbpSmallR_Seed <- as.tibble(
+  bind_rows(
+    bind_cols(tibble("score" = dbpSmallR1_Seed$j), tibble("step" = rep(1, nrow(dbpSmallR1_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = dbpSmallR2_Seed$j), tibble("step" = rep(2, nrow(dbpSmallR2_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = dbpSmallR3_Seed$j), tibble("step" = rep(3, nrow(dbpSmallR3_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = dbpSmallR4_Seed$j), tibble("step" = rep(4, nrow(dbpSmallR4_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = dbpSmallR5_Seed$j), tibble("step" = rep(5, nrow(dbpSmallR5_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = dbpSmallR6_Seed$j), tibble("step" = rep(6, nrow(dbpSmallR6_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = dbpSmallR7_Seed$j), tibble("step" = rep(7, nrow(dbpSmallR7_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = dbpSmallR8_Seed$j), tibble("step" = rep(8, nrow(dbpSmallR8_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = dbpSmallR9_Seed$j), tibble("step" = rep(9, nrow(dbpSmallR9_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = dbpSmallR10_Seed$j), tibble("step" = rep(10, nrow(dbpSmallR10_Seed)), strategy="Random"))
+  ) 
+)
+dbpSmallR_Seed$step <- factor(dbpSmallR_Seed$step) 
+ggplot(dbpSmallR_Seed, aes(step, score)) + geom_boxplot()
+
+dbpSmall_Seed <- bind_rows( dbpSmallP_Seed, dbpSmallU_Seed, dbpSmallR_Seed )
+dbpSmall_Seed$strategy <- factor(dbpSmall_Seed$strategy) 
+dbpSmall_Seed$strategy <- fct_relevel(dbpSmall_Seed$strategy, c("Prioritised", "Unprioritised", "Random"))
+dbpSmall_Seed$step <- factor(dbpSmall_Seed$step)
+ggplot(dbpSmall_Seed, aes(step, score, fill=strategy, color=strategy)) + geom_violin() + theme_bw()
+
+```
+
+dbpHuge_Seed
+```{r}
+dbpHugeP_Seed <- as.tibble(
+  bind_rows(
+    bind_cols(tibble("score" = dbpHugeP1_Seed$j), tibble("step" = rep(1, nrow(dbpHugeP1_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpHugeP2_Seed$j), tibble("step" = rep(2, nrow(dbpHugeP2_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpHugeP3_Seed$j), tibble("step" = rep(3, nrow(dbpHugeP3_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpHugeP4_Seed$j), tibble("step" = rep(4, nrow(dbpHugeP4_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpHugeP5_Seed$j), tibble("step" = rep(5, nrow(dbpHugeP5_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpHugeP6_Seed$j), tibble("step" = rep(6, nrow(dbpHugeP6_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpHugeP7_Seed$j), tibble("step" = rep(7, nrow(dbpHugeP7_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpHugeP8_Seed$j), tibble("step" = rep(8, nrow(dbpHugeP8_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpHugeP9_Seed$j), tibble("step" = rep(9, nrow(dbpHugeP9_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpHugeP10_Seed$j), tibble("step" = rep(10, nrow(dbpHugeP10_Seed)), strategy="Prioritised"))
+  ) 
+)
+dbpHugeP_Seed$step <- factor(dbpHugeP_Seed$step) 
+ggplot(dbpHugeP_Seed, aes(step, score)) + geom_boxplot()
+
+dbpHugeU_Seed <- as.tibble(
+  bind_rows(
+    bind_cols(tibble("score" = dbpHugeU1_Seed$j), tibble("step" = rep(1, nrow(dbpHugeU1_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpHugeU2_Seed$j), tibble("step" = rep(2, nrow(dbpHugeU2_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpHugeU3_Seed$j), tibble("step" = rep(3, nrow(dbpHugeU3_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpHugeU4_Seed$j), tibble("step" = rep(4, nrow(dbpHugeU4_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpHugeU5_Seed$j), tibble("step" = rep(5, nrow(dbpHugeU5_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpHugeU6_Seed$j), tibble("step" = rep(6, nrow(dbpHugeU6_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpHugeU7_Seed$j), tibble("step" = rep(7, nrow(dbpHugeU7_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpHugeU8_Seed$j), tibble("step" = rep(8, nrow(dbpHugeU8_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpHugeU9_Seed$j), tibble("step" = rep(9, nrow(dbpHugeU9_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpHugeU10_Seed$j), tibble("step" = rep(10, nrow(dbpHugeU10_Seed)), strategy="Unprioritised"))
+  ) 
+)
+dbpHugeU_Seed$step <- factor(dbpHugeU_Seed$step) 
+ggplot(dbpHugeU_Seed, aes(step, score)) + geom_boxplot()
+
+dbpHugeR_Seed <- as.tibble(
+  bind_rows(
+    bind_cols(tibble("score" = dbpHugeR1_Seed$j), tibble("step" = rep(1, nrow(dbpHugeR1_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = dbpHugeR2_Seed$j), tibble("step" = rep(2, nrow(dbpHugeR2_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = dbpHugeR3_Seed$j), tibble("step" = rep(3, nrow(dbpHugeR3_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = dbpHugeR4_Seed$j), tibble("step" = rep(4, nrow(dbpHugeR4_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = dbpHugeR5_Seed$j), tibble("step" = rep(5, nrow(dbpHugeR5_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = dbpHugeR6_Seed$j), tibble("step" = rep(6, nrow(dbpHugeR6_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = dbpHugeR7_Seed$j), tibble("step" = rep(7, nrow(dbpHugeR7_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = dbpHugeR8_Seed$j), tibble("step" = rep(8, nrow(dbpHugeR8_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = dbpHugeR9_Seed$j), tibble("step" = rep(9, nrow(dbpHugeR9_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = dbpHugeR10_Seed$j), tibble("step" = rep(10, nrow(dbpHugeR10_Seed)), strategy="Random"))
+  ) 
+)
+dbpHugeR_Seed$step <- factor(dbpHugeR_Seed$step) 
+ggplot(dbpHugeR_Seed, aes(step, score)) + geom_boxplot(outlier.alpha = .1) + geom_violin()
+
+dbpHuge_Seed <- bind_rows( dbpHugeP_Seed, dbpHugeU_Seed, dbpHugeR_Seed )
+dbpHuge_Seed$strategy <- factor(dbpHuge_Seed$strategy) 
+dbpHuge_Seed$strategy <- fct_relevel(dbpHuge_Seed$strategy, c("Prioritised", "Unprioritised", "Random"))
+dbpHuge_Seed$step <- factor(dbpHuge_Seed$step)
+ggplot(dbpHuge_Seed, aes(step, score, fill=strategy, color=strategy)) + geom_violin() + theme_bw()
+
+```
+
+Box plots: Predecessor
+
+etree_Predecessor
+```{r}
+# combine data for all iterations per dataset/strategy combination
+etreeP_Predecessor <- as.tibble(
+  bind_rows(
+    bind_cols(tibble("score" = etreeP1_Seed$j), tibble("step" = rep(1, nrow(etreeP1_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = etreeP2_1$j), tibble("step" = rep(2, nrow(etreeP2_1)), strategy="Prioritised")),
+    bind_cols(tibble("score" = etreeP3_2$j), tibble("step" = rep(3, nrow(etreeP3_2)), strategy="Prioritised")),
+    bind_cols(tibble("score" = etreeP4_3$j), tibble("step" = rep(4, nrow(etreeP4_3)), strategy="Prioritised")),
+    bind_cols(tibble("score" = etreeP5_4$j), tibble("step" = rep(5, nrow(etreeP5_4)), strategy="Prioritised")),
+    bind_cols(tibble("score" = etreeP6_5$j), tibble("step" = rep(6, nrow(etreeP6_5)), strategy="Prioritised")),
+    bind_cols(tibble("score" = etreeP7_6$j), tibble("step" = rep(7, nrow(etreeP7_6)), strategy="Prioritised")),
+    bind_cols(tibble("score" = etreeP8_7$j), tibble("step" = rep(8, nrow(etreeP8_7)), strategy="Prioritised")),
+    bind_cols(tibble("score" = etreeP9_8$j), tibble("step" = rep(9, nrow(etreeP9_8)), strategy="Prioritised")),
+    bind_cols(tibble("score" = etreeP10_9$j), tibble("step" = rep(10, nrow(etreeP10_9)), strategy="Prioritised"))
+  ) 
+)
+etreeP_Predecessor$step <- factor(etreeP_Predecessor$step)
+etreeP_Predecessor$strategy <- factor(etreeP_Predecessor$strategy)
+
+etreeU_Predecessor <- as.tibble(
+  bind_rows(
+    bind_cols(tibble("score" = etreeU1_Seed$j), tibble("step" = rep(1, nrow(etreeU1_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = etreeU2_1$j), tibble("step" = rep(2, nrow(etreeU2_1)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = etreeU3_2$j), tibble("step" = rep(3, nrow(etreeU3_2)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = etreeU4_3$j), tibble("step" = rep(4, nrow(etreeU4_3)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = etreeU5_4$j), tibble("step" = rep(5, nrow(etreeU5_4)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = etreeU6_5$j), tibble("step" = rep(6, nrow(etreeU6_5)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = etreeU7_6$j), tibble("step" = rep(7, nrow(etreeU7_6)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = etreeU8_7$j), tibble("step" = rep(8, nrow(etreeU8_7)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = etreeU9_8$j), tibble("step" = rep(9, nrow(etreeU9_8)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = etreeU10_9$j), tibble("step" = rep(10, nrow(etreeU10_9)), strategy="Unprioritised"))
+  ) 
+)
+etreeU_Predecessor$step <- factor(etreeU_Predecessor$step)
+etreeU_Predecessor$strategy <- factor(etreeU_Predecessor$strategy)
+
+etreeR_Predecessor <- as.tibble(
+  bind_rows(
+    bind_cols(tibble("score" = etreeR1_Seed$j), tibble("step" = rep(1, nrow(etreeR1_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = etreeR2_1$j), tibble("step" = rep(2, nrow(etreeR2_1)), strategy="Random")),
+    bind_cols(tibble("score" = etreeR3_2$j), tibble("step" = rep(3, nrow(etreeR3_2)), strategy="Random")),
+    bind_cols(tibble("score" = etreeR4_3$j), tibble("step" = rep(4, nrow(etreeR4_3)), strategy="Random")),
+    bind_cols(tibble("score" = etreeR5_4$j), tibble("step" = rep(5, nrow(etreeR5_4)), strategy="Random")),
+    bind_cols(tibble("score" = etreeR6_5$j), tibble("step" = rep(6, nrow(etreeR6_5)), strategy="Random")),
+    bind_cols(tibble("score" = etreeR7_6$j), tibble("step" = rep(7, nrow(etreeR7_6)), strategy="Random")),
+    bind_cols(tibble("score" = etreeR8_7$j), tibble("step" = rep(8, nrow(etreeR8_7)), strategy="Random")),
+    bind_cols(tibble("score" = etreeR9_8$j), tibble("step" = rep(9, nrow(etreeR9_8)), strategy="Random")),
+    bind_cols(tibble("score" = etreeR10_9$j), tibble("step" = rep(10, nrow(etreeR10_9)), strategy="Random"))
+  ) 
+)
+etreeR_Predecessor$step <- factor(etreeR_Predecessor$step)
+etreeR_Predecessor$strategy <- factor(etreeR_Predecessor$strategy)
+
+etree_Predecessor <- bind_rows( etreeP_Predecessor, etreeU_Predecessor, etreeR_Predecessor )
+etree_Predecessor$strategy <- factor(etree_Predecessor$strategy) 
+etree_Predecessor$strategy <- fct_relevel(etree_Predecessor$strategy, c("Prioritised", "Unprioritised", "Random"))
+etree_Predecessor$step <- factor(etree_Predecessor$step)
+ggplot(etree_Predecessor, aes(step, score, fill=strategy, color=strategy)) + geom_violin() + theme_bw()
+
+```
+
+eeboo_Predecessor
+```{r}
+# combine data for all iterations per dataset/strategy combination
+eebooP_Predecessor <- as.tibble(
+  bind_rows(
+    bind_cols(tibble("score" = eebooP1_Seed$j), tibble("step" = rep(1, nrow(eebooP1_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = eebooP2_1$j), tibble("step" = rep(2, nrow(eebooP2_1)), strategy="Prioritised")),
+    bind_cols(tibble("score" = eebooP3_2$j), tibble("step" = rep(3, nrow(eebooP3_2)), strategy="Prioritised")),
+    bind_cols(tibble("score" = eebooP4_3$j), tibble("step" = rep(4, nrow(eebooP4_3)), strategy="Prioritised")),
+    bind_cols(tibble("score" = eebooP5_4$j), tibble("step" = rep(5, nrow(eebooP5_4)), strategy="Prioritised")),
+    bind_cols(tibble("score" = eebooP6_5$j), tibble("step" = rep(6, nrow(eebooP6_5)), strategy="Prioritised")),
+    bind_cols(tibble("score" = eebooP7_6$j), tibble("step" = rep(7, nrow(eebooP7_6)), strategy="Prioritised")),
+    bind_cols(tibble("score" = eebooP8_7$j), tibble("step" = rep(8, nrow(eebooP8_7)), strategy="Prioritised")),
+    bind_cols(tibble("score" = eebooP9_8$j), tibble("step" = rep(9, nrow(eebooP9_8)), strategy="Prioritised")),
+    bind_cols(tibble("score" = eebooP10_9$j), tibble("step" = rep(10, nrow(eebooP10_9)), strategy="Prioritised"))
+  ) 
+)
+eebooP_Predecessor$step <- factor(eebooP_Predecessor$step)
+eebooP_Predecessor$strategy <- factor(eebooP_Predecessor$strategy)
+
+eebooU_Predecessor <- as.tibble(
+  bind_rows(
+    bind_cols(tibble("score" = eebooU1_Seed$j), tibble("step" = rep(1, nrow(eebooU1_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = eebooU2_1$j), tibble("step" = rep(2, nrow(eebooU2_1)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = eebooU3_2$j), tibble("step" = rep(3, nrow(eebooU3_2)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = eebooU4_3$j), tibble("step" = rep(4, nrow(eebooU4_3)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = eebooU5_4$j), tibble("step" = rep(5, nrow(eebooU5_4)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = eebooU6_5$j), tibble("step" = rep(6, nrow(eebooU6_5)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = eebooU7_6$j), tibble("step" = rep(7, nrow(eebooU7_6)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = eebooU8_7$j), tibble("step" = rep(8, nrow(eebooU8_7)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = eebooU9_8$j), tibble("step" = rep(9, nrow(eebooU9_8)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = eebooU10_9$j), tibble("step" = rep(10, nrow(eebooU10_9)), strategy="Unprioritised"))
+  ) 
+)
+eebooU_Predecessor$step <- factor(eebooU_Predecessor$step)
+eebooU_Predecessor$strategy <- factor(eebooU_Predecessor$strategy)
+
+eebooR_Predecessor <- as.tibble(
+  bind_rows(
+    bind_cols(tibble("score" = eebooR1_Seed$j), tibble("step" = rep(1, nrow(eebooR1_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = eebooR2_1$j), tibble("step" = rep(2, nrow(eebooR2_1)), strategy="Random")),
+    bind_cols(tibble("score" = eebooR3_2$j), tibble("step" = rep(3, nrow(eebooR3_2)), strategy="Random")),
+    bind_cols(tibble("score" = eebooR4_3$j), tibble("step" = rep(4, nrow(eebooR4_3)), strategy="Random")),
+    bind_cols(tibble("score" = eebooR5_4$j), tibble("step" = rep(5, nrow(eebooR5_4)), strategy="Random")),
+    bind_cols(tibble("score" = eebooR6_5$j), tibble("step" = rep(6, nrow(eebooR6_5)), strategy="Random")),
+    bind_cols(tibble("score" = eebooR7_6$j), tibble("step" = rep(7, nrow(eebooR7_6)), strategy="Random")),
+    bind_cols(tibble("score" = eebooR8_7$j), tibble("step" = rep(8, nrow(eebooR8_7)), strategy="Random")),
+    bind_cols(tibble("score" = eebooR9_8$j), tibble("step" = rep(9, nrow(eebooR9_8)), strategy="Random")),
+    bind_cols(tibble("score" = eebooR10_9$j), tibble("step" = rep(10, nrow(eebooR10_9)), strategy="Random"))
+  ) 
+)
+eebooR_Predecessor$step <- factor(eebooR_Predecessor$step)
+eebooR_Predecessor$strategy <- factor(eebooR_Predecessor$strategy)
+
+eeboo_Predecessor <- bind_rows( eebooP_Predecessor, eebooU_Predecessor, eebooR_Predecessor )
+eeboo_Predecessor$strategy <- factor(eeboo_Predecessor$strategy) 
+eeboo_Predecessor$strategy <- fct_relevel(eeboo_Predecessor$strategy, c("Prioritised", "Unprioritised", "Random"))
+eeboo_Predecessor$step <- factor(eeboo_Predecessor$step)
+ggplot(eeboo_Predecessor, aes(step, score, fill=strategy, color=strategy)) + geom_violin() + theme_bw()
+
+```
+
+dbpSmall_Predecessor
+```{r}
+dbpSmallP_Predecessor <- as.tibble(
+  bind_rows(
+    bind_cols(tibble("score" = dbpSmallP1_Seed$j), tibble("step" = rep(1, nrow(dbpSmallP1_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpSmallP2_1$j), tibble("step" = rep(2, nrow(dbpSmallP2_1)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpSmallP3_2$j), tibble("step" = rep(3, nrow(dbpSmallP3_2)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpSmallP4_3$j), tibble("step" = rep(4, nrow(dbpSmallP4_3)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpSmallP5_4$j), tibble("step" = rep(5, nrow(dbpSmallP5_4)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpSmallP6_5$j), tibble("step" = rep(6, nrow(dbpSmallP6_5)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpSmallP7_6$j), tibble("step" = rep(7, nrow(dbpSmallP7_6)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpSmallP8_7$j), tibble("step" = rep(8, nrow(dbpSmallP8_7)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpSmallP9_8$j), tibble("step" = rep(9, nrow(dbpSmallP9_8)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpSmallP10_9$j), tibble("step" = rep(10, nrow(dbpSmallP10_9)), strategy="Prioritised"))
+  ) 
+)
+dbpSmallP_Predecessor$step <- factor(dbpSmallP_Predecessor$step)
+dbpSmallP_Predecessor$strategy <- factor(dbpSmallP_Predecessor$strategy)
+
+dbpSmallU_Predecessor <- as.tibble(
+  bind_rows(
+    bind_cols(tibble("score" = dbpSmallU1_Seed$j), tibble("step" = rep(1, nrow(dbpSmallU1_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpSmallU2_1$j), tibble("step" = rep(2, nrow(dbpSmallU2_1)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpSmallU3_2$j), tibble("step" = rep(3, nrow(dbpSmallU3_2)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpSmallU4_3$j), tibble("step" = rep(4, nrow(dbpSmallU4_3)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpSmallU5_4$j), tibble("step" = rep(5, nrow(dbpSmallU5_4)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpSmallU6_5$j), tibble("step" = rep(6, nrow(dbpSmallU6_5)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpSmallU7_6$j), tibble("step" = rep(7, nrow(dbpSmallU7_6)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpSmallU8_7$j), tibble("step" = rep(8, nrow(dbpSmallU8_7)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpSmallU9_8$j), tibble("step" = rep(9, nrow(dbpSmallU9_8)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpSmallU10_9$j), tibble("step" = rep(10, nrow(dbpSmallU10_9)), strategy="Unprioritised"))
+  ) 
+)
+dbpSmallU_Predecessor$step <- factor(dbpSmallU_Predecessor$step)
+dbpSmallU_Predecessor$strategy <- factor(dbpSmallU_Predecessor$strategy)
+
+dbpSmallR_Predecessor <- as.tibble(
+  bind_rows(
+    bind_cols(tibble("score" = dbpSmallR1_Seed$j), tibble("step" = rep(1, nrow(dbpSmallR1_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = dbpSmallR2_1$j), tibble("step" = rep(2, nrow(dbpSmallR2_1)), strategy="Random")),
+    bind_cols(tibble("score" = dbpSmallR3_2$j), tibble("step" = rep(3, nrow(dbpSmallR3_2)), strategy="Random")),
+    bind_cols(tibble("score" = dbpSmallR4_3$j), tibble("step" = rep(4, nrow(dbpSmallR4_3)), strategy="Random")),
+    bind_cols(tibble("score" = dbpSmallR5_4$j), tibble("step" = rep(5, nrow(dbpSmallR5_4)), strategy="Random")),
+    bind_cols(tibble("score" = dbpSmallR6_5$j), tibble("step" = rep(6, nrow(dbpSmallR6_5)), strategy="Random")),
+    bind_cols(tibble("score" = dbpSmallR7_6$j), tibble("step" = rep(7, nrow(dbpSmallR7_6)), strategy="Random")),
+    bind_cols(tibble("score" = dbpSmallR8_7$j), tibble("step" = rep(8, nrow(dbpSmallR8_7)), strategy="Random")),
+    bind_cols(tibble("score" = dbpSmallR9_8$j), tibble("step" = rep(9, nrow(dbpSmallR9_8)), strategy="Random")),
+    bind_cols(tibble("score" = dbpSmallR10_9$j), tibble("step" = rep(10, nrow(dbpSmallR10_9)), strategy="Random"))
+  ) 
+)
+dbpSmallR_Predecessor$step <- factor(dbpSmallR_Predecessor$step)
+dbpSmallR_Predecessor$strategy <- factor(dbpSmallR_Predecessor$strategy)
+
+dbpSmall_Predecessor <- bind_rows( dbpSmallP_Predecessor, dbpSmallU_Predecessor, dbpSmallR_Predecessor )
+dbpSmall_Predecessor$strategy <- factor(dbpSmall_Predecessor$strategy) 
+dbpSmall_Predecessor$strategy <- fct_relevel(dbpSmall_Predecessor$strategy, c("Prioritised", "Unprioritised", "Random"))
+dbpSmall_Predecessor$step <- factor(dbpSmall_Predecessor$step)
+dbpSmall_Predecessor$step <- fct_expand(dbpSmall_Predecessor$step, 9, 10) # because it runs out after 8th step in DECR 
+ggplot(dbpSmall_Predecessor, aes(step, score, fill=strategy, color=strategy)) + geom_violin() + theme_bw()
+```
+
+dbpHuge_Predecessor
+```{r}
+
+dbpHugeP_Predecessor <- as.tibble(
+  bind_rows(
+    bind_cols(tibble("score" = dbpHugeP1_Seed$j), tibble("step" = rep(1, nrow(dbpHugeP1_Seed)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpHugeP2_1$j), tibble("step" = rep(2, nrow(dbpHugeP2_1)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpHugeP3_2$j), tibble("step" = rep(3, nrow(dbpHugeP3_2)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpHugeP4_3$j), tibble("step" = rep(4, nrow(dbpHugeP4_3)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpHugeP5_4$j), tibble("step" = rep(5, nrow(dbpHugeP5_4)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpHugeP6_5$j), tibble("step" = rep(6, nrow(dbpHugeP6_5)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpHugeP7_6$j), tibble("step" = rep(7, nrow(dbpHugeP7_6)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpHugeP8_7$j), tibble("step" = rep(8, nrow(dbpHugeP8_7)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpHugeP9_8$j), tibble("step" = rep(9, nrow(dbpHugeP9_8)), strategy="Prioritised")),
+    bind_cols(tibble("score" = dbpHugeP10_9$j), tibble("step" = rep(10, nrow(dbpHugeP10_9)), strategy="Prioritised"))
+  ) 
+)
+dbpHugeP_Predecessor$step <- factor(dbpHugeP_Predecessor$step)
+dbpHugeP_Predecessor$strategy <- factor(dbpHugeP_Predecessor$strategy)
+
+dbpHugeU_Predecessor <- as.tibble(
+  bind_rows(
+    bind_cols(tibble("score" = dbpHugeU1_Seed$j), tibble("step" = rep(1, nrow(dbpHugeU1_Seed)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpHugeU2_1$j), tibble("step" = rep(2, nrow(dbpHugeU2_1)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpHugeU3_2$j), tibble("step" = rep(3, nrow(dbpHugeU3_2)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpHugeU4_3$j), tibble("step" = rep(4, nrow(dbpHugeU4_3)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpHugeU5_4$j), tibble("step" = rep(5, nrow(dbpHugeU5_4)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpHugeU6_5$j), tibble("step" = rep(6, nrow(dbpHugeU6_5)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpHugeU7_6$j), tibble("step" = rep(7, nrow(dbpHugeU7_6)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpHugeU8_7$j), tibble("step" = rep(8, nrow(dbpHugeU8_7)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpHugeU9_8$j), tibble("step" = rep(9, nrow(dbpHugeU9_8)), strategy="Unprioritised")),
+    bind_cols(tibble("score" = dbpHugeU10_9$j), tibble("step" = rep(10, nrow(dbpHugeU10_9)), strategy="Unprioritised"))
+  ) 
+)
+dbpHugeU_Predecessor$step <- factor(dbpHugeU_Predecessor$step)
+dbpHugeU_Predecessor$strategy <- factor(dbpHugeU_Predecessor$strategy)
+
+dbpHugeR_Predecessor <- as.tibble(
+  bind_rows(
+    bind_cols(tibble("score" = dbpHugeR1_Seed$j), tibble("step" = rep(1, nrow(dbpHugeR1_Seed)), strategy="Random")),
+    bind_cols(tibble("score" = dbpHugeR2_1$j), tibble("step" = rep(2, nrow(dbpHugeR2_1)), strategy="Random")),
+    bind_cols(tibble("score" = dbpHugeR3_2$j), tibble("step" = rep(3, nrow(dbpHugeR3_2)), strategy="Random")),
+    bind_cols(tibble("score" = dbpHugeR4_3$j), tibble("step" = rep(4, nrow(dbpHugeR4_3)), strategy="Random")),
+    bind_cols(tibble("score" = dbpHugeR5_4$j), tibble("step" = rep(5, nrow(dbpHugeR5_4)), strategy="Random")),
+    bind_cols(tibble("score" = dbpHugeR6_5$j), tibble("step" = rep(6, nrow(dbpHugeR6_5)), strategy="Random")),
+    bind_cols(tibble("score" = dbpHugeR7_6$j), tibble("step" = rep(7, nrow(dbpHugeR7_6)), strategy="Random")),
+    bind_cols(tibble("score" = dbpHugeR8_7$j), tibble("step" = rep(8, nrow(dbpHugeR8_7)), strategy="Random")),
+    bind_cols(tibble("score" = dbpHugeR9_8$j), tibble("step" = rep(9, nrow(dbpHugeR9_8)), strategy="Random")),
+    bind_cols(tibble("score" = dbpHugeR10_9$j), tibble("step" = rep(10, nrow(dbpHugeR10_9)), strategy="Random"))
+  ) 
+)
+dbpHugeR_Predecessor$step <- factor(dbpHugeR_Predecessor$step)
+dbpHugeR_Predecessor$strategy <- factor(dbpHugeR_Predecessor$strategy)
+
+dbpHuge_Predecessor <- bind_rows( dbpHugeP_Predecessor, dbpHugeU_Predecessor, dbpHugeR_Predecessor )
+dbpHuge_Predecessor$strategy <- factor(dbpHuge_Predecessor$strategy) 
+dbpHuge_Predecessor$strategy <- fct_relevel(dbpHuge_Predecessor$strategy, c("Prioritised", "Unprioritised", "Random"))
+
+ggplot(dbpHuge_Predecessor, aes(step, score, fill=strategy, color=strategy)) + geom_violin() + theme_bw()
+
+```
+
+
+
+
+KS TESTS
+=========
+
+
+KS-tests: dbpHuge, to seed, across
+```{r}
+dbpHuge_Seed_kstests <- c(
+      ks.test(dbpHugeP1_Seed$j, dbpHugeU1_Seed$j)$p,
+      ks.test(dbpHugeP1_Seed$j, dbpHugeR1_Seed$j)$p,
+      ks.test(dbpHugeU1_Seed$j, dbpHugeR1_Seed$j)$p,
+      ks.test(dbpHugeP2_Seed$j, dbpHugeU2_Seed$j)$p,
+      ks.test(dbpHugeP2_Seed$j, dbpHugeR2_Seed$j)$p,
+      ks.test(dbpHugeU2_Seed$j, dbpHugeR2_Seed$j)$p,
+      ks.test(dbpHugeP3_Seed$j, dbpHugeU3_Seed$j)$p,
+      ks.test(dbpHugeP3_Seed$j, dbpHugeR3_Seed$j)$p,
+      ks.test(dbpHugeU3_Seed$j, dbpHugeR3_Seed$j)$p,
+      ks.test(dbpHugeP4_Seed$j, dbpHugeU4_Seed$j)$p,
+      ks.test(dbpHugeP4_Seed$j, dbpHugeR4_Seed$j)$p,
+      ks.test(dbpHugeU4_Seed$j, dbpHugeR4_Seed$j)$p,
+      ks.test(dbpHugeP5_Seed$j, dbpHugeU5_Seed$j)$p,
+      ks.test(dbpHugeP5_Seed$j, dbpHugeR5_Seed$j)$p,
+      ks.test(dbpHugeU5_Seed$j, dbpHugeR5_Seed$j)$p,
+      ks.test(dbpHugeP6_Seed$j, dbpHugeU6_Seed$j)$p,
+      ks.test(dbpHugeP6_Seed$j, dbpHugeR6_Seed$j)$p,
+      ks.test(dbpHugeU6_Seed$j, dbpHugeR6_Seed$j)$p,
+      ks.test(dbpHugeP7_Seed$j, dbpHugeU7_Seed$j)$p,
+      ks.test(dbpHugeP7_Seed$j, dbpHugeR7_Seed$j)$p,
+      ks.test(dbpHugeU7_Seed$j, dbpHugeR7_Seed$j)$p,
+      ks.test(dbpHugeP8_Seed$j, dbpHugeU8_Seed$j)$p,
+      ks.test(dbpHugeP8_Seed$j, dbpHugeR8_Seed$j)$p,
+      ks.test(dbpHugeU8_Seed$j, dbpHugeR8_Seed$j)$p,
+      ks.test(dbpHugeP9_Seed$j, dbpHugeU9_Seed$j)$p,
+      ks.test(dbpHugeP9_Seed$j, dbpHugeR9_Seed$j)$p,
+      ks.test(dbpHugeU9_Seed$j, dbpHugeR9_Seed$j)$p,
+      ks.test(dbpHugeP10_Seed$j, dbpHugeU10_Seed$j)$p,
+      ks.test(dbpHugeP10_Seed$j, dbpHugeR10_Seed$j)$p,
+      ks.test(dbpHugeU10_Seed$j, dbpHugeR10_Seed$j)$p
+    )
+
+dbpHuge_Seed_ks <- as.tibble(cbind(dbpHuge_Seed_kstests, rep(c("Prioritised", "Prioritised", "Unprioritised"), 10), rep(c("Unprioritised", "Random", "Random"), 10), step))
+names(dbpHuge_Seed_ks) <- c("p", "strat1", "strat2", "step")
+dbpHuge_Seed_ks$p <- as.numeric(dbpHuge_Seed_ks$p)
+dbpHuge_Seed_ks$signif <- dbpHuge_Seed_ks$p < sidak
+
+
+```
+
+
+
+KS-tests: dbpHuge, to predecessor, within
+```{r}
+dbpHuge_Predecessor_within_kstests <- c(
+      ks.test(dbpHugeP1_Seed$j, dbpHugeP2_1$j)$p,
+      ks.test(dbpHugeU1_Seed$j, dbpHugeU2_1$j)$p,
+      ks.test(dbpHugeR1_Seed$j, dbpHugeR2_1$j)$p,
+      ks.test(dbpHugeP2_1$j, dbpHugeP3_2$j)$p,
+      ks.test(dbpHugeU2_1$j, dbpHugeU3_2$j)$p,
+      ks.test(dbpHugeR2_1$j, dbpHugeR3_2$j)$p,
+      ks.test(dbpHugeP3_2$j, dbpHugeP4_3$j)$p,
+      ks.test(dbpHugeU3_2$j, dbpHugeU4_3$j)$p,
+      ks.test(dbpHugeR3_2$j, dbpHugeR4_3$j)$p,
+      ks.test(dbpHugeP4_3$j, dbpHugeP5_4$j)$p,
+      ks.test(dbpHugeU4_3$j, dbpHugeU5_4$j)$p,
+      ks.test(dbpHugeR4_3$j, dbpHugeR5_4$j)$p,
+      ks.test(dbpHugeP5_4$j, dbpHugeP6_5$j)$p,
+      ks.test(dbpHugeU5_4$j, dbpHugeU6_5$j)$p,
+      ks.test(dbpHugeR5_4$j, dbpHugeR6_5$j)$p,
+      ks.test(dbpHugeP6_5$j, dbpHugeP7_6$j)$p,
+      ks.test(dbpHugeU6_5$j, dbpHugeU7_6$j)$p,
+      ks.test(dbpHugeR6_5$j, dbpHugeR7_6$j)$p,
+      ks.test(dbpHugeP7_6$j, dbpHugeP8_7$j)$p,
+      ks.test(dbpHugeU7_6$j, dbpHugeU8_7$j)$p,
+      ks.test(dbpHugeR7_6$j, dbpHugeR8_7$j)$p,
+      ks.test(dbpHugeP8_7$j, dbpHugeP9_8$j)$p,
+      ks.test(dbpHugeU8_7$j, dbpHugeU9_8$j)$p,
+      ks.test(dbpHugeR8_7$j, dbpHugeR9_8$j)$p,
+      ks.test(dbpHugeP9_8$j, dbpHugeP10_9$j)$p,
+      ks.test(dbpHugeU9_8$j, dbpHugeU10_9$j)$p,
+      ks.test(dbpHugeR9_8$j, dbpHugeR10_9$j)$p
+    )
+
+dbpHuge_Predecessor_within_ks <- as.tibble(cbind(dbpHuge_Predecessor_within_kstests, rep(c("Prioritised", "Unprioritised", "Random"), 9), step[-seq(28:30)]))
+names(dbpHuge_Predecessor_within_ks) <- c("p", "strat", "step")
+dbpHuge_Predecessor_within_ks$p <- as.numeric(dbpHuge_Predecessor_within_ks$p)
+dbpHuge_Predecessor_within_ks$signif <- dbpHuge_Predecessor_within_ks$p < sidak
+
+```
+
+KS-tests: dbpHuge, to predecessor, across
+```{r}
+dbpHuge_Predecessor_kstests <- c(
+      ks.test(dbpHugeP1_Seed$j, dbpHugeU1_Seed$j)$p,
+      ks.test(dbpHugeP1_Seed$j, dbpHugeR1_Seed$j)$p,
+      ks.test(dbpHugeU1_Seed$j, dbpHugeR1_Seed$j)$p,
+      ks.test(dbpHugeP2_1$j, dbpHugeU2_1$j)$p,
+      ks.test(dbpHugeP2_1$j, dbpHugeR2_1$j)$p,
+      ks.test(dbpHugeU2_1$j, dbpHugeR2_1$j)$p,
+      ks.test(dbpHugeP3_2$j, dbpHugeU3_2$j)$p,
+      ks.test(dbpHugeP3_2$j, dbpHugeR3_2$j)$p,
+      ks.test(dbpHugeU3_2$j, dbpHugeR3_2$j)$p,
+      ks.test(dbpHugeP4_3$j, dbpHugeU4_3$j)$p,
+      ks.test(dbpHugeP4_3$j, dbpHugeR4_3$j)$p,
+      ks.test(dbpHugeU4_3$j, dbpHugeR4_3$j)$p,
+      ks.test(dbpHugeP5_4$j, dbpHugeU5_4$j)$p,
+      ks.test(dbpHugeP5_4$j, dbpHugeR5_4$j)$p,
+      ks.test(dbpHugeU5_4$j, dbpHugeR5_4$j)$p,
+      ks.test(dbpHugeP6_5$j, dbpHugeU6_5$j)$p,
+      ks.test(dbpHugeP6_5$j, dbpHugeR6_5$j)$p,
+      ks.test(dbpHugeU6_5$j, dbpHugeR6_5$j)$p,
+      ks.test(dbpHugeP7_6$j, dbpHugeU7_6$j)$p,
+      ks.test(dbpHugeP7_6$j, dbpHugeR7_6$j)$p,
+      ks.test(dbpHugeU7_6$j, dbpHugeR7_6$j)$p,
+      ks.test(dbpHugeP8_7$j, dbpHugeU8_7$j)$p,
+      ks.test(dbpHugeP8_7$j, dbpHugeR8_7$j)$p,
+      ks.test(dbpHugeU8_7$j, dbpHugeR8_7$j)$p,
+      ks.test(dbpHugeP9_8$j, dbpHugeU9_8$j)$p,
+      ks.test(dbpHugeP9_8$j, dbpHugeR9_8$j)$p,
+      ks.test(dbpHugeU9_8$j, dbpHugeR9_8$j)$p,
+      ks.test(dbpHugeP10_9$j, dbpHugeU10_9$j)$p,
+      ks.test(dbpHugeP10_9$j, dbpHugeR10_9$j)$p,
+      ks.test(dbpHugeU10_9$j, dbpHugeR10_9$j)$p
+    )
+
+dbpHuge_Predecessor_ks <- as.tibble(cbind(dbpHuge_Predecessor_kstests, rep(c("Prioritised", "Prioritised", "Unprioritised"), 10), rep(c("Unprioritised", "Random", "Random"), 10), step))
+names(dbpHuge_Predecessor_ks) <- c("p", "strat1", "strat2", "step")
+dbpHuge_Predecessor_ks$p <- as.numeric(dbpHuge_Predecessor_ks$p)
+dbpHuge_Predecessor_ks$signif <- dbpHuge_Predecessor_ks$p < sidak
+
+```
+
+KS-tests: dbpSmall, to seed, across
+```{r}
+dbpSmall_Seed_kstests <- c(
+      ks.test(dbpSmallP1_Seed$j, dbpSmallU1_Seed$j)$p,
+      ks.test(dbpSmallP1_Seed$j, dbpSmallR1_Seed$j)$p,
+      ks.test(dbpSmallU1_Seed$j, dbpSmallR1_Seed$j)$p,
+      ks.test(dbpSmallP2_Seed$j, dbpSmallU2_Seed$j)$p,
+      ks.test(dbpSmallP2_Seed$j, dbpSmallR2_Seed$j)$p,
+      ks.test(dbpSmallU2_Seed$j, dbpSmallR2_Seed$j)$p,
+      ks.test(dbpSmallP3_Seed$j, dbpSmallU3_Seed$j)$p,
+      ks.test(dbpSmallP3_Seed$j, dbpSmallR3_Seed$j)$p,
+      ks.test(dbpSmallU3_Seed$j, dbpSmallR3_Seed$j)$p,
+      ks.test(dbpSmallP4_Seed$j, dbpSmallU4_Seed$j)$p,
+      ks.test(dbpSmallP4_Seed$j, dbpSmallR4_Seed$j)$p,
+      ks.test(dbpSmallU4_Seed$j, dbpSmallR4_Seed$j)$p,
+      ks.test(dbpSmallP5_Seed$j, dbpSmallU5_Seed$j)$p,
+      ks.test(dbpSmallP5_Seed$j, dbpSmallR5_Seed$j)$p,
+      ks.test(dbpSmallU5_Seed$j, dbpSmallR5_Seed$j)$p,
+      ks.test(dbpSmallP6_Seed$j, dbpSmallU6_Seed$j)$p,
+      ks.test(dbpSmallP6_Seed$j, dbpSmallR6_Seed$j)$p,
+      ks.test(dbpSmallU6_Seed$j, dbpSmallR6_Seed$j)$p,
+      ks.test(dbpSmallP7_Seed$j, dbpSmallU7_Seed$j)$p,
+      ks.test(dbpSmallP7_Seed$j, dbpSmallR7_Seed$j)$p,
+      ks.test(dbpSmallU7_Seed$j, dbpSmallR7_Seed$j)$p,
+      ks.test(dbpSmallP8_Seed$j, dbpSmallU8_Seed$j)$p,
+      ks.test(dbpSmallP8_Seed$j, dbpSmallR8_Seed$j)$p,
+      ks.test(dbpSmallU8_Seed$j, dbpSmallR8_Seed$j)$p,
+      ks.test(dbpSmallP9_Seed$j, dbpSmallU9_Seed$j)$p,
+      ks.test(dbpSmallP9_Seed$j, dbpSmallR9_Seed$j)$p,
+      ks.test(dbpSmallU9_Seed$j, dbpSmallR9_Seed$j)$p,
+      ks.test(dbpSmallP10_Seed$j, dbpSmallU10_Seed$j)$p,
+      ks.test(dbpSmallP10_Seed$j, dbpSmallR10_Seed$j)$p,
+      ks.test(dbpSmallU10_Seed$j, dbpSmallR10_Seed$j)$p
+    )
+
+dbpSmall_Seed_ks <- as.tibble(cbind(dbpSmall_Seed_kstests, rep(c("Prioritised", "Prioritised", "Unprioritised"), 10), rep(c("Unprioritised", "Random", "Random"), 10), step))
+names(dbpSmall_Seed_ks) <- c("p", "strat1", "strat2", "step")
+dbpSmall_Seed_ks$p <- as.numeric(dbpSmall_Seed_ks$p)
+dbpSmall_Seed_ks$signif <- dbpSmall_Seed_ks$p < sidak
+xtable(dbpSmall_Seed_ks)
+
+```
+
+
+
+KS-tests: dbpSmall, to predecessor, within
+```{r}
+dbpSmall_Predecessor_within_kstests <- c(
+      ks.test(dbpSmallP1_Seed$j, dbpSmallP2_1$j)$p,
+      ks.test(dbpSmallU1_Seed$j, dbpSmallU2_1$j)$p,
+      ks.test(dbpSmallR1_Seed$j, dbpSmallR2_1$j)$p,
+      ks.test(dbpSmallP2_1$j, dbpSmallP3_2$j)$p,
+      ks.test(dbpSmallU2_1$j, dbpSmallU3_2$j)$p,
+      ks.test(dbpSmallR2_1$j, dbpSmallR3_2$j)$p,
+      ks.test(dbpSmallP3_2$j, dbpSmallP4_3$j)$p,
+      ks.test(dbpSmallU3_2$j, dbpSmallU4_3$j)$p,
+      ks.test(dbpSmallR3_2$j, dbpSmallR4_3$j)$p,
+      ks.test(dbpSmallP4_3$j, dbpSmallP5_4$j)$p,
+      ks.test(dbpSmallU4_3$j, dbpSmallU5_4$j)$p,
+      ks.test(dbpSmallR4_3$j, dbpSmallR5_4$j)$p,
+      ks.test(dbpSmallP5_4$j, dbpSmallP6_5$j)$p,
+      ks.test(dbpSmallU5_4$j, dbpSmallU6_5$j)$p,
+      ks.test(dbpSmallR5_4$j, dbpSmallR6_5$j)$p,
+      ks.test(dbpSmallP6_5$j, dbpSmallP7_6$j)$p,
+      ks.test(dbpSmallU6_5$j, dbpSmallU7_6$j)$p,
+      ks.test(dbpSmallR6_5$j, dbpSmallR7_6$j)$p,
+      ks.test(dbpSmallP7_6$j, dbpSmallP8_7$j)$p,
+      ks.test(dbpSmallU7_6$j, dbpSmallU8_7$j)$p,
+      ks.test(dbpSmallR7_6$j, dbpSmallR8_7$j)$p,
+      ks.test(dbpSmallP8_7$j, dbpSmallP9_8$j)$p,
+      ks.test(dbpSmallU8_7$j, dbpSmallU9_8$j)$p,
+      ks.test(dbpSmallR8_7$j, dbpSmallR9_8$j)$p,
+      ks.test(dbpSmallP9_8$j, dbpSmallP10_9$j)$p,
+      ks.test(dbpSmallU9_8$j, dbpSmallU10_9$j)$p,
+      ks.test(dbpSmallR9_8$j, dbpSmallR10_9$j)$p
+    )
+
+dbpSmall_Predecessor_within_ks <- as.tibble(cbind(dbpSmall_Predecessor_within_kstests, rep(c("Prioritised", "Unprioritised", "Random"), 9), step[-seq(28:30)]))
+names(dbpSmall_Predecessor_within_ks) <- c("p", "strat", "step")
+dbpSmall_Predecessor_within_ks$p <- as.numeric(dbpSmall_Predecessor_within_ks$p)
+dbpSmall_Predecessor_within_ks$signif <- dbpSmall_Predecessor_within_ks$p < sidak
+
+```
+
+KS-tests: dbpSmall, to predecessor, across
+```{r}
+dbpSmall_Predecessor_kstests <- c(
+      ks.test(dbpSmallP1_Seed$j, dbpSmallU1_Seed$j)$p,
+      ks.test(dbpSmallP1_Seed$j, dbpSmallR1_Seed$j)$p,
+      ks.test(dbpSmallU1_Seed$j, dbpSmallR1_Seed$j)$p,
+      ks.test(dbpSmallP2_1$j, dbpSmallU2_1$j)$p,
+      ks.test(dbpSmallP2_1$j, dbpSmallR2_1$j)$p,
+      ks.test(dbpSmallU2_1$j, dbpSmallR2_1$j)$p,
+      ks.test(dbpSmallP3_2$j, dbpSmallU3_2$j)$p,
+      ks.test(dbpSmallP3_2$j, dbpSmallR3_2$j)$p,
+      ks.test(dbpSmallU3_2$j, dbpSmallR3_2$j)$p,
+      ks.test(dbpSmallP4_3$j, dbpSmallU4_3$j)$p,
+      ks.test(dbpSmallP4_3$j, dbpSmallR4_3$j)$p,
+      ks.test(dbpSmallU4_3$j, dbpSmallR4_3$j)$p,
+      ks.test(dbpSmallP5_4$j, dbpSmallU5_4$j)$p,
+      ks.test(dbpSmallP5_4$j, dbpSmallR5_4$j)$p,
+      ks.test(dbpSmallU5_4$j, dbpSmallR5_4$j)$p,
+      ks.test(dbpSmallP6_5$j, dbpSmallU6_5$j)$p,
+      ks.test(dbpSmallP6_5$j, dbpSmallR6_5$j)$p,
+      ks.test(dbpSmallU6_5$j, dbpSmallR6_5$j)$p,
+      ks.test(dbpSmallP7_6$j, dbpSmallU7_6$j)$p,
+      ks.test(dbpSmallP7_6$j, dbpSmallR7_6$j)$p,
+      ks.test(dbpSmallU7_6$j, dbpSmallR7_6$j)$p,
+      ks.test(dbpSmallP8_7$j, dbpSmallU8_7$j)$p,
+      ks.test(dbpSmallP8_7$j, dbpSmallR8_7$j)$p,
+      ks.test(dbpSmallU8_7$j, dbpSmallR8_7$j)$p,
+      ks.test(dbpSmallP9_8$j, dbpSmallU9_8$j)$p,
+      ks.test(dbpSmallP9_8$j, dbpSmallR9_8$j)$p,
+      ks.test(dbpSmallU9_8$j, dbpSmallR9_8$j)$p,
+      ks.test(dbpSmallP10_9$j, dbpSmallU10_9$j)$p,
+      ks.test(dbpSmallP10_9$j, dbpSmallR10_9$j)$p,
+      ks.test(dbpSmallU10_9$j, dbpSmallR10_9$j)$p
+    )
+
+dbpSmall_Predecessor_ks <- as.tibble(cbind(dbpSmall_Predecessor_kstests, rep(c("Prioritised", "Prioritised", "Unprioritised"), 10), rep(c("Unprioritised", "Random", "Random"), 10), step))
+names(dbpSmall_Predecessor_ks) <- c("p", "strat1", "strat2", "step")
+dbpSmall_Predecessor_ks$p <- as.numeric(dbpSmall_Predecessor_ks$p)
+dbpSmall_Predecessor_ks$signif <- dbpSmall_Predecessor_ks$p < sidak
+```
+
+
+KS-tests: eeboo, to seed, across
+```{r}
+eeboo_Seed_kstests <- c(
+      ks.test(eebooP1_Seed$j, eebooU1_Seed$j)$p,
+      ks.test(eebooP1_Seed$j, eebooR1_Seed$j)$p,
+      ks.test(eebooU1_Seed$j, eebooR1_Seed$j)$p,
+      ks.test(eebooP2_Seed$j, eebooU2_Seed$j)$p,
+      ks.test(eebooP2_Seed$j, eebooR2_Seed$j)$p,
+      ks.test(eebooU2_Seed$j, eebooR2_Seed$j)$p,
+      ks.test(eebooP3_Seed$j, eebooU3_Seed$j)$p,
+      ks.test(eebooP3_Seed$j, eebooR3_Seed$j)$p,
+      ks.test(eebooU3_Seed$j, eebooR3_Seed$j)$p,
+      ks.test(eebooP4_Seed$j, eebooU4_Seed$j)$p,
+      ks.test(eebooP4_Seed$j, eebooR4_Seed$j)$p,
+      ks.test(eebooU4_Seed$j, eebooR4_Seed$j)$p,
+      ks.test(eebooP5_Seed$j, eebooU5_Seed$j)$p,
+      ks.test(eebooP5_Seed$j, eebooR5_Seed$j)$p,
+      ks.test(eebooU5_Seed$j, eebooR5_Seed$j)$p,
+      ks.test(eebooP6_Seed$j, eebooU6_Seed$j)$p,
+      ks.test(eebooP6_Seed$j, eebooR6_Seed$j)$p,
+      ks.test(eebooU6_Seed$j, eebooR6_Seed$j)$p,
+      ks.test(eebooP7_Seed$j, eebooU7_Seed$j)$p,
+      ks.test(eebooP7_Seed$j, eebooR7_Seed$j)$p,
+      ks.test(eebooU7_Seed$j, eebooR7_Seed$j)$p,
+      ks.test(eebooP8_Seed$j, eebooU8_Seed$j)$p,
+      ks.test(eebooP8_Seed$j, eebooR8_Seed$j)$p,
+      ks.test(eebooU8_Seed$j, eebooR8_Seed$j)$p,
+      ks.test(eebooP9_Seed$j, eebooU9_Seed$j)$p,
+      ks.test(eebooP9_Seed$j, eebooR9_Seed$j)$p,
+      ks.test(eebooU9_Seed$j, eebooR9_Seed$j)$p,
+      ks.test(eebooP10_Seed$j, eebooU10_Seed$j)$p,
+      ks.test(eebooP10_Seed$j, eebooR10_Seed$j)$p,
+      ks.test(eebooU10_Seed$j, eebooR10_Seed$j)$p
+    )
+
+eeboo_Seed_ks <- as.tibble(cbind(eeboo_Seed_kstests, rep(c("Prioritised", "Prioritised", "Unprioritised"), 10), rep(c("Unprioritised", "Unprioritised", "Random"), 10), step))
+names(eeboo_Seed_ks) <- c("p", "strat1", "strat2", "step")
+eeboo_Seed_ks$p <- as.numeric(eeboo_Seed_ks$p)
+eeboo_Seed_ks$signif <- eeboo_Seed_ks$p < sidak
+
+```
+
+
+
+KS-tests: eeboo, to predecessor, within
+```{r}
+eeboo_Predecessor_within_kstests <- c(
+      ks.test(eebooP1_Seed$j, eebooP2_1$j)$p,
+      ks.test(eebooU1_Seed$j, eebooU2_1$j)$p,
+      ks.test(eebooR1_Seed$j, eebooR2_1$j)$p,
+      ks.test(eebooP2_1$j, eebooP3_2$j)$p,
+      ks.test(eebooU2_1$j, eebooU3_2$j)$p,
+      ks.test(eebooR2_1$j, eebooR3_2$j)$p,
+      ks.test(eebooP3_2$j, eebooP4_3$j)$p,
+      ks.test(eebooU3_2$j, eebooU4_3$j)$p,
+      ks.test(eebooR3_2$j, eebooR4_3$j)$p,
+      ks.test(eebooP4_3$j, eebooP5_4$j)$p,
+      ks.test(eebooU4_3$j, eebooU5_4$j)$p,
+      ks.test(eebooR4_3$j, eebooR5_4$j)$p,
+      ks.test(eebooP5_4$j, eebooP6_5$j)$p,
+      ks.test(eebooU5_4$j, eebooU6_5$j)$p,
+      ks.test(eebooR5_4$j, eebooR6_5$j)$p,
+      ks.test(eebooP6_5$j, eebooP7_6$j)$p,
+      ks.test(eebooU6_5$j, eebooU7_6$j)$p,
+      ks.test(eebooR6_5$j, eebooR7_6$j)$p,
+      ks.test(eebooP7_6$j, eebooP8_7$j)$p,
+      ks.test(eebooU7_6$j, eebooU8_7$j)$p,
+      ks.test(eebooR7_6$j, eebooR8_7$j)$p,
+      ks.test(eebooP8_7$j, eebooP9_8$j)$p,
+      ks.test(eebooU8_7$j, eebooU9_8$j)$p,
+      ks.test(eebooR8_7$j, eebooR9_8$j)$p,
+      ks.test(eebooP9_8$j, eebooP10_9$j)$p,
+      ks.test(eebooU9_8$j, eebooU10_9$j)$p,
+      ks.test(eebooR9_8$j, eebooR10_9$j)$p
+    )
+
+eeboo_Predecessor_within_ks <- as.tibble(cbind(eeboo_Predecessor_within_kstests, rep(c("Prioritised", "Unprioritised", "Random"), 9), step[-seq(28:30)]))
+names(eeboo_Predecessor_within_ks) <- c("p", "strat", "step")
+eeboo_Predecessor_within_ks$p <- as.numeric(eeboo_Predecessor_within_ks$p)
+eeboo_Predecessor_within_ks$signif <- eeboo_Predecessor_within_ks$p < sidak
+
+```
+
+
+KS-tests: eeboo, to predecessor, across
+```{r}
+eeboo_Predecessor_kstests <- c(
+      ks.test(eebooP1_Seed$j, eebooU1_Seed$j)$p,
+      ks.test(eebooP1_Seed$j, eebooR1_Seed$j)$p,
+      ks.test(eebooU1_Seed$j, eebooR1_Seed$j)$p,
+      ks.test(eebooP2_1$j, eebooU2_1$j)$p,
+      ks.test(eebooP2_1$j, eebooR2_1$j)$p,
+      ks.test(eebooU2_1$j, eebooR2_1$j)$p,
+      ks.test(eebooP3_2$j, eebooU3_2$j)$p,
+      ks.test(eebooP3_2$j, eebooR3_2$j)$p,
+      ks.test(eebooU3_2$j, eebooR3_2$j)$p,
+      ks.test(eebooP4_3$j, eebooU4_3$j)$p,
+      ks.test(eebooP4_3$j, eebooR4_3$j)$p,
+      ks.test(eebooU4_3$j, eebooR4_3$j)$p,
+      ks.test(eebooP5_4$j, eebooU5_4$j)$p,
+      ks.test(eebooP5_4$j, eebooR5_4$j)$p,
+      ks.test(eebooU5_4$j, eebooR5_4$j)$p,
+      ks.test(eebooP6_5$j, eebooU6_5$j)$p,
+      ks.test(eebooP6_5$j, eebooR6_5$j)$p,
+      ks.test(eebooU6_5$j, eebooR6_5$j)$p,
+      ks.test(eebooP7_6$j, eebooU7_6$j)$p,
+      ks.test(eebooP7_6$j, eebooR7_6$j)$p,
+      ks.test(eebooU7_6$j, eebooR7_6$j)$p,
+      ks.test(eebooP8_7$j, eebooU8_7$j)$p,
+      ks.test(eebooP8_7$j, eebooR8_7$j)$p,
+      ks.test(eebooU8_7$j, eebooR8_7$j)$p,
+      ks.test(eebooP9_8$j, eebooU9_8$j)$p,
+      ks.test(eebooP9_8$j, eebooR9_8$j)$p,
+      ks.test(eebooU9_8$j, eebooR9_8$j)$p,
+      ks.test(eebooP10_9$j, eebooU10_9$j)$p,
+      ks.test(eebooP10_9$j, eebooR10_9$j)$p,
+      ks.test(eebooU10_9$j, eebooR10_9$j)$p
+    )
+
+eeboo_Predecessor_ks <- as.tibble(cbind(eeboo_Predecessor_kstests, rep(c("Prioritised", "Prioritised", "Unprioritised"), 10), rep(c("Unprioritised", "Unprioritised", "Random"), 10), step))
+names(eeboo_Predecessor_ks) <- c("p", "strat1", "strat2", "step")
+eeboo_Predecessor_ks$p <- as.numeric(eeboo_Predecessor_ks$p)
+eeboo_Predecessor_ks$signif <- eeboo_Predecessor_ks$p < sidak
+```
+
+Combined (Seed & Predecessor) mirror plots
+```{r}
+dbpHuge_Predecessor$strategy <- fct_recode(dbpHuge_Predecessor$strategy, Reset="Random")
+dbpSmall_Predecessor$strategy <- fct_recode(dbpSmall_Predecessor$strategy, Reset="Random")
+
+grid.arrange(
+  ggplot(dbpHuge_Seed, aes(step, score, fill=strategy, color=strategy)) + geom_violin()  + theme_bw() + scale_fill_brewer(palette ="Dark2") + scale_colour_brewer(palette="Dark2") + ylim(0, .7) + theme(legend.position=c(.8,.6), legend.direction="horizontal", legend.key.size = unit(2, "points")) + ylab("Similarity to\nSeed Workset 1") + xlab("") + labs(fill = "") + scale_x_discrete(position = "top") + guides(fill=FALSE, colour=FALSE) ,
+  ggplot(dbpHuge_Predecessor, aes(step, score, fill=strategy, color=strategy)) + geom_violin()  + theme_bw() + scale_fill_brewer(palette ="Dark2") + ylim(0, .7) + scale_colour_brewer(palette="Dark2")+ ylab("Similarity to\nPreceding Workset") + xlab("") + labs(fill = "") + scale_y_reverse() + theme(legend.position=c(.1,-.14), legend.direction = "horizontal", legend.background = element_blank()) + guides(fill = FALSE, colour=FALSE)
+, ncol=1)
+
+dbpHuge_Predecessor$step <- fct_expand(dbpHuge_Predecessor$step, 9, 10)
+dbpSmall_Predecessor$step <- fct_expand(dbpSmall_Predecessor$step, 9, 10)
+
+grid.arrange(
+  ggplot(dbpSmall_Seed, aes(step, score, fill=strategy, color=strategy)) + geom_violin()  + theme_bw() + scale_fill_brewer(palette ="Dark2") + scale_colour_brewer(palette="Dark2") + ylim(0, .7) + theme(legend.position=c(.8,.6), legend.direction="horizontal", legend.key.size = unit(2, "points"), axis.title = element_text(size = 9)) + ylab("Similarity to\nSeed Workset 2") + xlab("Iteration") + labs(fill = "") + scale_x_discrete(position = "top") + guides(fill=FALSE, colour=FALSE) ,
+  ggplot(dbpSmall_Predecessor, aes(step, score, fill=strategy, color=strategy)) + geom_violin()  + theme_bw() + scale_fill_brewer(palette ="Dark2") + ylim(0, .7) + scale_colour_brewer(palette="Dark2")+ ylab("Similarity to\nPreceding Workset") + xlab("Iteration") + labs(fill = "") + scale_y_reverse() + theme(legend.position=c(.1,-.14), legend.direction = "horizontal", legend.background = element_blank(), axis.title = element_text(size = 9)) + guides(colour=FALSE) + scale_x_discrete(drop=FALSE)
+, ncol=1)
+
+
+# 
+# grid.arrange(
+#   ggplot(dbpSmall_Seed, aes(step, score, fill=strategy, color=strategy)) + geom_violin()  + theme_bw() + scale_fill_brewer(palette ="Dark2") + scale_colour_brewer(palette="Dark2") + ylim(0, .7) + theme(legend.position=c(.8,.6), legend.direction="horizontal", legend.key.size = unit(2, "points")) + ylab("Similarity to\n seed workset") + xlab("Simulation step") + labs(fill = "") + scale_x_discrete(position = "top") + guides(fill=FALSE, colour=FALSE) ,
+#   ggplot(dbpSmall_Predecessor, aes(step, score, fill=strategy, color=strategy)) + geom_violin()  + theme_bw() + scale_fill_brewer(palette ="Dark2") + ylim(0, .7) + scale_colour_brewer(palette="Dark2")+ ylab("Similarity to preceding workset") + xlab("Simulation step") + labs(fill = "Simulated strategy") + scale_y_reverse() + theme(legend.position="bottom") + guides(fill=FALSE, colour=FALSE)+scale_x_discrete(drop=FALSE)
+# , ncol=1)
+
+
+
+
+grid.arrange(
+  ggplot(eeboo_Seed, aes(step, score, fill=strategy, colour=strategy)) + geom_violin()  + theme_bw() + scale_fill_brewer(palette ="Dark2") + scale_colour_brewer(palette="Dark2") + ylim(0, .7) + theme(legend.position=c(.8,.6), legend.direction="horizontal", legend.key.size = unit(2, "points")) + ylab("Seed set") + xlab("Simulation step") + labs(fill = "") + scale_x_discrete(position = "top") + guides(colour=FALSE) , 
+  ggplot(eeboo_Predecessor, aes(step, score, fill=strategy, colour=strategy)) + geom_violin()  + theme_bw() + scale_fill_brewer(palette ="Dark2") + scale_colour_brewer(palette="Dark2") + ylim(0, .7) + ylab("Predecessor") + xlab("Simulation step") + labs(fill = "Simulated strategy") + scale_y_reverse() + theme(legend.position="bottom") + guides(fill=FALSE, colour=FALSE)
+, ncol=1)
+
+```
+
+
+ks test summary:
+```{r}
+dbpHuge_Seed_ks %>% filter(!signif) # 0 results, all significantly different
+dbpHuge_Predecessor_ks%>% filter(!signif) # 0 results, all significantly different
+dbpHuge_Predecessor_within_ks %>% filter(!signif)
+```
